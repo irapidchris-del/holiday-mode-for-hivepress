@@ -46,6 +46,13 @@ hidden and holiday mode stays on until the subscription is active again.
 * `holiday_mode_for_hivepress_is_vendor` ( bool $is_vendor, int $user_id )
   Return true to treat a user as a vendor (who then sees the toggle).
 
+= Automatic updates =
+
+The plugin checks its GitHub repository for new releases and offers updates
+through the normal WordPress Plugins screen, just like a wp.org plugin. You can
+also trigger a check yourself with the "Check for updates" link on the plugin's
+row on the Plugins page. Update checks are cached for 12 hours.
+
 == Requirements ==
 
 * HivePress (required).
@@ -58,6 +65,9 @@ hidden and holiday mode stays on until the subscription is active again.
 2. Activate the plugin through the Plugins screen.
 3. Make sure HivePress is installed and active. Vendors will find the
    "Holiday mode" toggle under Account → Settings.
+
+Once installed, future versions can be updated in place from the Plugins screen
+— no need to download the ZIP again.
 
 == Frequently Asked Questions ==
 
@@ -79,6 +89,12 @@ an active subscription (administrators are exempt). Once the subscription is
 active, they can switch holiday mode off and their listings are restored. On
 sites without WooCommerce Subscriptions, there is no such restriction.
 
+= How do I get updates? =
+
+The plugin updates itself from its GitHub releases. When a new version is
+published, WordPress shows the usual update notice on the Plugins screen. To
+check immediately, use the "Check for updates" link on the plugin's row.
+
 = What happens to my listings if I delete the plugin? =
 
 On uninstall, any listings still hidden by the plugin are restored to their
@@ -88,6 +104,8 @@ stranded in draft.
 == Changelog ==
 
 = 1.1.0 =
+* Added: automatic updates direct from the plugin's GitHub releases, plus a
+  "Check for updates" link on the plugin's row on the Plugins screen.
 * Fixed: unrelated profile updates (WooCommerce account edits, wp-admin user
   edits, or any `wp_update_user()` call) no longer silently toggle holiday mode
   off or restore/hide listings. The toggle now runs only from the account
