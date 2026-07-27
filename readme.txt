@@ -51,7 +51,7 @@ hidden and holiday mode stays on until the subscription is active again.
 The plugin checks its GitHub repository for new releases and offers updates
 through the normal WordPress Plugins screen, just like a wp.org plugin. You can
 also trigger a check yourself with the "Check for updates" link on the plugin's
-row on the Plugins page. Update checks are cached for 12 hours.
+row on the Plugins page. Update checks are cached for 6 hours.
 
 == Requirements ==
 

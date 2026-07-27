@@ -2,9 +2,11 @@
 /**
  * GitHub release updater.
  *
- * Lets the plugin update itself from GitHub releases, so a single stable
- * repository link can be shared and users always receive the latest version
- * through the normal WordPress update flow.
+ * The plugin is distributed via GitHub releases rather than wp.org, so
+ * update checks go through the native `update_plugins_{$hostname}` API
+ * introduced in WordPress 5.8, keyed off the Update URI header in the main
+ * plugin file. The update package is the release asset named `*.zip`, which
+ * must contain a single `holiday-mode-for-hivepress` directory.
  *
  * @package Holiday_Mode_For_HivePress
  */
@@ -16,29 +18,24 @@ if ( ! defined( 'ABSPATH' ) ) {
 if ( ! class_exists( 'Holiday_Mode_For_HivePress_Updater' ) ) :
 
 	/**
-	 * Checks GitHub releases and feeds updates into WordPress.
+	 * Serves GitHub releases to the WordPress update system.
 	 */
 	final class Holiday_Mode_For_HivePress_Updater {
 
 		/**
 		 * Cached release payload.
 		 */
-		const TRANSIENT = 'holiday_mode_for_hivepress_release';
+		const CACHE_KEY = 'holiday_mode_for_hivepress_release';
 
 		/**
-		 * How long a successful lookup is cached.
+		 * Query arg used by the manual "Check for updates" link.
 		 */
-		const CACHE_TTL = 43200; // 12 hours.
+		const CHECK_ARG = 'holiday_mode_check_updates';
 
 		/**
-		 * How long a failed lookup is cached (avoids hammering the API).
+		 * Query arg carrying the manual check result.
 		 */
-		const CACHE_TTL_FAIL = 3600; // 1 hour.
-
-		/**
-		 * Query arg used by the "Check for updates" link.
-		 */
-		const CHECK_ARG = 'holiday_mode_check_update';
+		const RESULT_ARG = 'holiday_mode_checked';
 
 		/**
 		 * Absolute path to the main plugin file.
@@ -55,18 +52,11 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress_Updater' ) ) :
 		private $basename;
 
 		/**
-		 * Plugin directory slug.
+		 * Plugin slug (directory name).
 		 *
 		 * @var string
 		 */
 		private $slug;
-
-		/**
-		 * Installed version.
-		 *
-		 * @var string
-		 */
-		private $version;
 
 		/**
 		 * GitHub repository in owner/name form.
@@ -78,292 +68,223 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress_Updater' ) ) :
 		/**
 		 * Constructor.
 		 *
-		 * @param string $file    Main plugin file.
-		 * @param string $version Installed version.
-		 * @param string $repo    GitHub repository (owner/name).
+		 * @param string $file Main plugin file.
+		 * @param string $repo GitHub repository (owner/name).
 		 */
-		public function __construct( $file, $version, $repo ) {
+		public function __construct( $file, $repo ) {
 			$this->file     = $file;
 			$this->basename = plugin_basename( $file );
 			$this->slug     = dirname( $this->basename );
-			$this->version  = $version;
 			$this->repo     = $repo;
 
-			add_filter( 'pre_set_site_transient_update_plugins', [ $this, 'inject_update' ] );
-			add_filter( 'plugins_api', [ $this, 'plugin_info' ], 20, 3 );
-			add_filter( 'plugin_action_links_' . $this->basename, [ $this, 'action_links' ] );
-			add_filter( 'upgrader_source_selection', [ $this, 'fix_source_dir' ], 10, 4 );
-			add_action( 'upgrader_process_complete', [ $this, 'clear_cache' ], 10, 0 );
-			add_action( 'admin_init', [ $this, 'handle_manual_check' ] );
-			add_action( 'admin_notices', [ $this, 'manual_check_notice' ] );
+			add_filter( 'update_plugins_github.com', [ $this, 'check_for_update' ], 10, 3 );
+			add_filter( 'plugins_api', [ $this, 'get_plugin_information' ], 10, 3 );
+			add_filter( 'plugin_action_links_' . $this->basename, [ $this, 'add_update_check_link' ] );
+			add_filter( 'network_admin_plugin_action_links_' . $this->basename, [ $this, 'add_update_check_link' ] );
+			add_filter( 'upgrader_source_selection', [ $this, 'fix_update_directory' ], 10, 4 );
+			add_action( 'admin_init', [ $this, 'handle_update_check' ] );
+			add_action( 'admin_notices', [ $this, 'show_update_check_notice' ] );
+			add_action( 'network_admin_notices', [ $this, 'show_update_check_notice' ] );
+		}
+
+		/**
+		 * Gets the installed plugin version from the file header.
+		 *
+		 * Reading the header keeps the version in a single place, so releasing
+		 * only requires bumping the `Version:` line.
+		 *
+		 * @return string
+		 */
+		public function get_version() {
+			static $version = null;
+
+			if ( null === $version ) {
+				$data    = get_file_data( $this->file, [ 'Version' => 'Version' ] );
+				$version = $data['Version'];
+			}
+
+			return $version;
 		}
 
 		/* ---------------- Remote lookup ---------------- */
 
 		/**
-		 * Returns the latest release data, cached.
+		 * Gets the latest GitHub release details, cached for 6 hours.
 		 *
 		 * @param bool $force Bypass the cache.
-		 * @return array|false Release data, or false when unavailable.
+		 * @return array<string, string>|null
 		 */
-		private function get_release( $force = false ) {
-			if ( ! $force ) {
-				$cached = get_site_transient( self::TRANSIENT );
-				if ( is_array( $cached ) ) {
-					return $cached;
-				}
-				if ( 'none' === $cached ) {
-					return false;
-				}
+		public function get_latest_release( $force = false ) {
+			$release = $force ? false : get_site_transient( self::CACHE_KEY );
+
+			if ( ! is_array( $release ) ) {
+				$release = $this->fetch_latest_release();
+
+				// Failures are cached briefly so the API is not queried repeatedly.
+				set_site_transient( self::CACHE_KEY, $release, $release ? 6 * HOUR_IN_SECONDS : HOUR_IN_SECONDS );
 			}
 
+			return $release ? $release : null;
+		}
+
+		/**
+		 * Fetches the latest release details from the GitHub API.
+		 *
+		 * Draft and pre-release entries are excluded by the endpoint itself, so
+		 * publishing a pre-release never triggers an update notice.
+		 *
+		 * @return array<string, string>
+		 */
+		private function fetch_latest_release() {
 			$response = wp_remote_get(
 				'https://api.github.com/repos/' . $this->repo . '/releases/latest',
 				[
 					'timeout' => 10,
-					'headers' => [
-						'Accept'     => 'application/vnd.github+json',
-						'User-Agent' => 'holiday-mode-for-hivepress/' . $this->version,
-					],
+					'headers' => [ 'Accept' => 'application/vnd.github+json' ],
 				]
 			);
 
-			if ( is_wp_error( $response ) || 200 !== (int) wp_remote_retrieve_response_code( $response ) ) {
-				set_site_transient( self::TRANSIENT, 'none', self::CACHE_TTL_FAIL );
-				return false;
+			if ( is_wp_error( $response ) || 200 !== wp_remote_retrieve_response_code( $response ) ) {
+				return [];
 			}
 
-			$body = json_decode( wp_remote_retrieve_body( $response ), true );
+			$data = json_decode( wp_remote_retrieve_body( $response ), true );
 
-			if ( ! is_array( $body ) || empty( $body['tag_name'] ) ) {
-				set_site_transient( self::TRANSIENT, 'none', self::CACHE_TTL_FAIL );
-				return false;
+			if ( ! is_array( $data ) ) {
+				return [];
 			}
 
-			$release = [
-				'version'      => ltrim( (string) $body['tag_name'], 'vV' ),
-				'download_url' => $this->pick_download_url( $body ),
-				'url'          => ! empty( $body['html_url'] ) ? $body['html_url'] : 'https://github.com/' . $this->repo,
-				'published_at' => ! empty( $body['published_at'] ) ? gmdate( 'Y-m-d H:i:s', strtotime( $body['published_at'] ) ) : '',
-				'body'         => ! empty( $body['body'] ) ? (string) $body['body'] : '',
-			];
+			// The version is read from the release tag, with or without a "v" prefix.
+			$version = ltrim( (string) ( isset( $data['tag_name'] ) ? $data['tag_name'] : '' ), 'vV' );
 
-			if ( empty( $release['download_url'] ) ) {
-				set_site_transient( self::TRANSIENT, 'none', self::CACHE_TTL_FAIL );
-				return false;
+			if ( ! $version ) {
+				return [];
 			}
 
-			set_site_transient( self::TRANSIENT, $release, self::CACHE_TTL );
+			// The update package is the first release asset named `*.zip`.
+			$package = '';
 
-			return $release;
-		}
+			foreach ( (array) ( isset( $data['assets'] ) ? $data['assets'] : [] ) as $asset ) {
+				$name = strtolower( (string) ( isset( $asset['name'] ) ? $asset['name'] : '' ) );
 
-		/**
-		 * Chooses the best download URL: a packaged .zip asset if one was
-		 * attached to the release, otherwise GitHub's generated source archive.
-		 *
-		 * @param array $body Decoded release payload.
-		 * @return string
-		 */
-		private function pick_download_url( $body ) {
-			$fallback = '';
+				if ( '.zip' === substr( $name, -4 ) && ! empty( $asset['browser_download_url'] ) ) {
+					$package = (string) $asset['browser_download_url'];
 
-			if ( ! empty( $body['assets'] ) && is_array( $body['assets'] ) ) {
-				foreach ( $body['assets'] as $asset ) {
-					if ( empty( $asset['browser_download_url'] ) ) {
-						continue;
-					}
-					$name = isset( $asset['name'] ) ? strtolower( $asset['name'] ) : '';
-					if ( substr( $name, -4 ) !== '.zip' ) {
-						continue;
-					}
-					// Prefer an asset named exactly after the plugin slug.
-					if ( $this->slug . '.zip' === $name ) {
-						return $asset['browser_download_url'];
-					}
-					if ( ! $fallback ) {
-						$fallback = $asset['browser_download_url'];
-					}
+					break;
 				}
 			}
 
-			if ( $fallback ) {
-				return $fallback;
+			if ( ! $package ) {
+				return [];
 			}
 
-			return ! empty( $body['zipball_url'] ) ? $body['zipball_url'] : '';
+			return [
+				'version'   => $version,
+				'package'   => $package,
+				'url'       => (string) ( isset( $data['html_url'] ) ? $data['html_url'] : 'https://github.com/' . $this->repo ),
+				'notes'     => (string) ( isset( $data['body'] ) ? $data['body'] : '' ),
+				'published' => (string) ( isset( $data['published_at'] ) ? $data['published_at'] : '' ),
+			];
 		}
 
 		/* ---------------- Update wiring ---------------- */
 
 		/**
-		 * Adds our release to the plugin update transient.
+		 * Provides the update details to the WordPress update system.
 		 *
-		 * @param mixed $transient Update transient.
-		 * @return mixed
+		 * WordPress matches the plugin to this filter via the Update URI header
+		 * hostname and compares the versions itself, filing the result under
+		 * either the available updates or the up-to-date list.
+		 *
+		 * @param array<string, mixed>|false $update      Update data.
+		 * @param array<string, string>      $plugin_data Plugin headers.
+		 * @param string                     $plugin_file Plugin basename.
+		 * @return array<string, mixed>|false
 		 */
-		public function inject_update( $transient ) {
-			if ( ! is_object( $transient ) ) {
-				$transient = new stdClass();
+		public function check_for_update( $update, $plugin_data, $plugin_file ) {
+			if ( $this->basename !== $plugin_file ) {
+				return $update;
 			}
 
-			$release = $this->get_release();
+			$release = $this->get_latest_release();
+
 			if ( ! $release ) {
-				return $transient;
+				return $update;
 			}
 
-			$item = (object) [
-				'id'            => 'github.com/' . $this->repo,
-				'slug'          => $this->slug,
-				'plugin'        => $this->basename,
-				'new_version'   => $release['version'],
-				'url'           => $release['url'],
-				'package'       => $release['download_url'],
-				'requires'      => '6.0',
-				'requires_php'  => '7.4',
-				'icons'         => [],
-				'banners'       => [],
-				'banners_rtl'   => [],
-				'compatibility' => new stdClass(),
+			return [
+				'id'      => 'https://github.com/' . $this->repo,
+				'slug'    => $this->slug,
+				'plugin'  => $plugin_file,
+				'version' => $release['version'],
+				'url'     => $release['url'],
+				'package' => $release['package'],
 			];
-
-			if ( version_compare( $release['version'], $this->version, '>' ) ) {
-				$transient->response[ $this->basename ] = $item;
-				unset( $transient->no_update[ $this->basename ] );
-			} else {
-				$transient->no_update[ $this->basename ] = $item;
-				unset( $transient->response[ $this->basename ] );
-			}
-
-			return $transient;
 		}
 
 		/**
-		 * Supplies data for the plugin details modal.
+		 * Provides the plugin details for the update information popup.
 		 *
-		 * @param mixed  $result Response object or false.
-		 * @param string $action The API action being performed.
-		 * @param object $args   API arguments.
-		 * @return mixed
+		 * Without this the "View version x.x.x details" link on the Plugins
+		 * screen would open an empty modal, since the plugin is not on wp.org.
+		 *
+		 * @param object|array|false $result Result object.
+		 * @param string             $action API action.
+		 * @param object             $args   API arguments.
+		 * @return object|array|false
 		 */
-		public function plugin_info( $result, $action, $args ) {
-			if ( 'plugin_information' !== $action ) {
-				return $result;
-			}
-			if ( empty( $args->slug ) || $args->slug !== $this->slug ) {
+		public function get_plugin_information( $result, $action, $args ) {
+			if ( 'plugin_information' !== $action || ! is_object( $args ) || $this->slug !== ( isset( $args->slug ) ? $args->slug : '' ) ) {
 				return $result;
 			}
 
-			$release = $this->get_release();
+			$release = $this->get_latest_release();
+
 			if ( ! $release ) {
 				return $result;
 			}
 
-			if ( ! function_exists( 'get_plugin_data' ) ) {
-				require_once ABSPATH . 'wp-admin/includes/plugin.php';
-			}
-
-			$data = get_plugin_data( $this->file, false, false );
+			$plugin_data = get_file_data(
+				$this->file,
+				[
+					'Name'        => 'Plugin Name',
+					'Description' => 'Description',
+					'Author'      => 'Author',
+					'AuthorURI'   => 'Author URI',
+					'RequiresWP'  => 'Requires at least',
+					'RequiresPHP' => 'Requires PHP',
+				]
+			);
 
 			return (object) [
-				'name'           => ! empty( $data['Name'] ) ? $data['Name'] : 'Holiday Mode for HivePress',
-				'slug'           => $this->slug,
-				'version'        => $release['version'],
-				'author'         => ! empty( $data['Author'] ) ? $data['Author'] : '',
-				'homepage'       => 'https://github.com/' . $this->repo,
-				'download_link'  => $release['download_url'],
-				'trunk'          => $release['download_url'],
-				'requires'       => '6.0',
-				'requires_php'   => '7.4',
-				'last_updated'   => $release['published_at'],
-				'sections'       => [
-					'description' => ! empty( $data['Description'] ) ? wpautop( wp_kses_post( $data['Description'] ) ) : '',
-					'changelog'   => $this->render_notes( $release['body'] ),
+				'name'          => $plugin_data['Name'],
+				'slug'          => $this->slug,
+				'version'       => $release['version'],
+				'author'        => '<a href="' . esc_url( $plugin_data['AuthorURI'] ) . '">' . esc_html( $plugin_data['Author'] ) . '</a>',
+				'homepage'      => 'https://github.com/' . $this->repo,
+				'requires'      => $plugin_data['RequiresWP'],
+				'requires_php'  => $plugin_data['RequiresPHP'],
+				'last_updated'  => $release['published'],
+				'download_link' => $release['package'],
+				'sections'      => [
+					'description' => wpautop( esc_html( $plugin_data['Description'] ) ),
+					'changelog'   => $release['notes'] ? wpautop( esc_html( $release['notes'] ) ) : '<p>' . esc_html__( 'See the GitHub releases page for the changelog.', 'holiday-mode-for-hivepress' ) . '</p>',
 				],
-				'external'       => true,
-				'banners'        => [],
 			];
-		}
-
-		/**
-		 * Renders GitHub release notes as safe HTML.
-		 *
-		 * @param string $notes Raw release notes.
-		 * @return string
-		 */
-		private function render_notes( $notes ) {
-			if ( '' === trim( (string) $notes ) ) {
-				return esc_html__( 'See the GitHub releases page for details.', 'holiday-mode-for-hivepress' );
-			}
-			return wpautop( esc_html( $notes ) );
-		}
-
-		/**
-		 * Ensures the extracted folder is named after the plugin slug, so an
-		 * update replaces the existing install instead of creating a new one.
-		 *
-		 * @param string $source        Extracted source directory.
-		 * @param string $remote_source Working directory.
-		 * @param object $upgrader      Upgrader instance.
-		 * @param array  $hook_extra    Extra arguments.
-		 * @return string|WP_Error
-		 */
-		public function fix_source_dir( $source, $remote_source, $upgrader = null, $hook_extra = [] ) {
-			if ( empty( $hook_extra['plugin'] ) || $hook_extra['plugin'] !== $this->basename ) {
-				return $source;
-			}
-
-			global $wp_filesystem;
-			if ( ! $wp_filesystem ) {
-				return $source;
-			}
-
-			$desired = trailingslashit( $remote_source ) . $this->slug;
-
-			if ( untrailingslashit( $source ) === $desired ) {
-				return $source;
-			}
-
-			if ( $wp_filesystem->exists( $desired ) ) {
-				$wp_filesystem->delete( $desired, true );
-			}
-
-			if ( $wp_filesystem->move( untrailingslashit( $source ), $desired ) ) {
-				return trailingslashit( $desired );
-			}
-
-			return $source;
-		}
-
-		/**
-		 * Clears the cached release after any upgrade completes.
-		 *
-		 * @return void
-		 */
-		public function clear_cache() {
-			delete_site_transient( self::TRANSIENT );
 		}
 
 		/* ---------------- Manual check ---------------- */
 
 		/**
-		 * Adds a "Check for updates" link to the plugin row.
+		 * Adds the manual update check link to the plugin row.
 		 *
-		 * @param array $links Existing action links.
-		 * @return array
+		 * @param array<string> $links Plugin action links.
+		 * @return array<string>
 		 */
-		public function action_links( $links ) {
-			if ( ! current_user_can( 'update_plugins' ) ) {
-				return $links;
+		public function add_update_check_link( $links ) {
+			if ( current_user_can( 'update_plugins' ) ) {
+				$links[] = '<a href="' . esc_url( wp_nonce_url( self_admin_url( 'plugins.php?' . self::CHECK_ARG . '=1' ), self::CHECK_ARG ) ) . '">' . esc_html__( 'Check for updates', 'holiday-mode-for-hivepress' ) . '</a>';
 			}
-
-			$url = wp_nonce_url(
-				add_query_arg( self::CHECK_ARG, '1', self_admin_url( 'plugins.php' ) ),
-				self::CHECK_ARG,
-				'_hmnonce'
-			);
-
-			$links[] = '<a href="' . esc_url( $url ) . '">' . esc_html__( 'Check for updates', 'holiday-mode-for-hivepress' ) . '</a>';
 
 			return $links;
 		}
@@ -371,81 +292,106 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress_Updater' ) ) :
 		/**
 		 * Handles the manual update check.
 		 *
+		 * Refreshes the cached release, re-runs the update check and redirects
+		 * back to the Plugins screen with the result.
+		 *
 		 * @return void
 		 */
-		public function handle_manual_check() {
-			if ( ! isset( $_GET[ self::CHECK_ARG ] ) ) {
-				return;
-			}
-			if ( ! current_user_can( 'update_plugins' ) ) {
-				return;
-			}
-			$nonce = isset( $_GET['_hmnonce'] ) ? sanitize_key( wp_unslash( $_GET['_hmnonce'] ) ) : '';
-			if ( ! wp_verify_nonce( $nonce, self::CHECK_ARG ) ) {
+		public function handle_update_check() {
+			if ( ! isset( $_GET[ self::CHECK_ARG ] ) || ! current_user_can( 'update_plugins' ) ) {
 				return;
 			}
 
-			delete_site_transient( self::TRANSIENT );
+			check_admin_referer( self::CHECK_ARG );
 
-			$release   = $this->get_release( true );
-			$has_update = $release && version_compare( $release['version'], $this->version, '>' );
+			$release = $this->get_latest_release( true );
 
-			// Force WordPress to rebuild its update data too.
-			delete_site_transient( 'update_plugins' );
+			wp_clean_plugins_cache();
 			wp_update_plugins();
 
-			$args = [ 'holiday_mode_checked' => $has_update ? '1' : '0' ];
+			$status = 'none';
+
 			if ( ! $release ) {
-				$args['holiday_mode_checked'] = 'error';
-			} elseif ( $has_update ) {
-				$args['holiday_mode_version'] = rawurlencode( $release['version'] );
+				$status = 'error';
+			} elseif ( version_compare( $release['version'], $this->get_version(), '>' ) ) {
+				$status = 'available';
 			}
 
-			wp_safe_redirect( add_query_arg( $args, self_admin_url( 'plugins.php' ) ) );
+			wp_safe_redirect( add_query_arg( self::RESULT_ARG, $status, self_admin_url( 'plugins.php' ) ) );
+
 			exit;
 		}
 
 		/**
-		 * Shows the result of a manual update check.
+		 * Shows the manual update check result.
 		 *
 		 * @return void
 		 */
-		public function manual_check_notice() {
-			if ( ! isset( $_GET['holiday_mode_checked'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-				return;
-			}
-			if ( ! current_user_can( 'update_plugins' ) ) {
+		public function show_update_check_notice() {
+			if ( ! isset( $_GET[ self::RESULT_ARG ] ) || ! current_user_can( 'update_plugins' ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 				return;
 			}
 
-			$state = sanitize_key( wp_unslash( $_GET['holiday_mode_checked'] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			$status = sanitize_key( wp_unslash( $_GET[ self::RESULT_ARG ] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 
-			if ( 'error' === $state ) {
-				echo '<div class="notice notice-error is-dismissible"><p>';
-				echo esc_html__( 'Holiday Mode for HivePress: could not reach GitHub to check for updates. Please try again later.', 'holiday-mode-for-hivepress' );
-				echo '</p></div>';
+			if ( 'available' === $status ) {
+				$release = $this->get_latest_release();
+
+				/* translators: %s: new version number. */
+				$message = sprintf( __( 'A new version of Holiday Mode for HivePress (%s) is available.', 'holiday-mode-for-hivepress' ), $release ? $release['version'] : '' );
+				$class   = 'notice-success';
+			} elseif ( 'none' === $status ) {
+				$message = __( 'Holiday Mode for HivePress is up to date.', 'holiday-mode-for-hivepress' );
+				$class   = 'notice-success';
+			} elseif ( 'error' === $status ) {
+				$message = __( 'Could not reach GitHub to check for updates. Please try again later.', 'holiday-mode-for-hivepress' );
+				$class   = 'notice-error';
+			} else {
 				return;
 			}
 
-			if ( '1' === $state ) {
-				$version = isset( $_GET['holiday_mode_version'] ) ? sanitize_text_field( wp_unslash( $_GET['holiday_mode_version'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-				echo '<div class="notice notice-warning is-dismissible"><p>';
-				printf(
-					/* translators: %s: the new version number. */
-					esc_html__( 'Holiday Mode for HivePress: version %s is available. Use the update link on the plugin row to install it.', 'holiday-mode-for-hivepress' ),
-					esc_html( $version )
-				);
-				echo '</p></div>';
-				return;
+			echo '<div class="notice ' . esc_attr( $class ) . ' is-dismissible"><p>' . esc_html( $message ) . '</p></div>';
+		}
+
+		/* ---------------- Install location ---------------- */
+
+		/**
+		 * Keeps updates installing into the current plugin directory.
+		 *
+		 * The extracted release folder is renamed to match the directory the
+		 * plugin is installed in, so an update can never end up in a differently
+		 * named folder even if the release zip is packaged unexpectedly.
+		 *
+		 * @param string               $source        Extracted update source.
+		 * @param string               $remote_source Remote source directory.
+		 * @param object               $upgrader      Upgrader instance.
+		 * @param array<string, mixed> $hook_extra    Extra hook arguments.
+		 * @return string|WP_Error
+		 */
+		public function fix_update_directory( $source, $remote_source, $upgrader, $hook_extra = [] ) {
+			global $wp_filesystem;
+
+			if ( $this->basename !== ( isset( $hook_extra['plugin'] ) ? $hook_extra['plugin'] : '' ) || ! $wp_filesystem ) {
+				return $source;
 			}
 
-			echo '<div class="notice notice-success is-dismissible"><p>';
-			printf(
-				/* translators: %s: the installed version number. */
-				esc_html__( 'Holiday Mode for HivePress is up to date (version %s).', 'holiday-mode-for-hivepress' ),
-				esc_html( $this->version )
-			);
-			echo '</p></div>';
+			$directory = dirname( $this->basename );
+
+			if ( '.' === $directory ) {
+				return $source;
+			}
+
+			$target = trailingslashit( $remote_source ) . $directory . '/';
+
+			if ( trailingslashit( $source ) === $target ) {
+				return $source;
+			}
+
+			if ( ! $wp_filesystem->move( untrailingslashit( $source ), untrailingslashit( $target ) ) ) {
+				return new WP_Error( 'holiday_mode_rename_failed', __( 'Could not rename the update directory.', 'holiday-mode-for-hivepress' ) );
+			}
+
+			return $target;
 		}
 	}
 

@@ -14,17 +14,12 @@
  * Text Domain:       holiday-mode-for-hivepress
  * Domain Path:       /languages
  * Update URI:        https://github.com/irapidchris-del/holiday-mode-for-hivepress
- * GitHub Plugin URI: irapidchris-del/holiday-mode-for-hivepress
  *
  * @package Holiday_Mode_For_HivePress
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
-}
-
-if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION' ) ) {
-	define( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION', '1.1.0' );
 }
 
 if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_REPO' ) ) {
@@ -630,11 +625,7 @@ if ( ! function_exists( 'holiday_mode_for_hivepress_bootstrap' ) ) {
 		// every request (not just admin) so background update checks run by
 		// WP-Cron also see our releases; the remote lookup itself is cached.
 		if ( class_exists( 'Holiday_Mode_For_HivePress_Updater' ) ) {
-			new Holiday_Mode_For_HivePress_Updater(
-				__FILE__,
-				HOLIDAY_MODE_FOR_HIVEPRESS_VERSION,
-				HOLIDAY_MODE_FOR_HIVEPRESS_REPO
-			);
+			new Holiday_Mode_For_HivePress_Updater( __FILE__, HOLIDAY_MODE_FOR_HIVEPRESS_REPO );
 		}
 
 		if ( ! function_exists( 'hivepress' ) ) {
