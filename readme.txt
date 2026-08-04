@@ -4,7 +4,7 @@ Tags: hivepress, marketplace, vendor, listings, holiday
 Requires at least: 6.0
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 1.4.0
+Stable tag: 1.4.2
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -121,13 +121,14 @@ holiday mode to pause a paid listing period or a subscription term.
 
 = Do buyers know that I am away? =
 
-Yes. While holiday mode is on, your public vendor profile shows a small
-"Away on holiday" notice under your name, letting buyers know you may take
-longer than usual to reply. It disappears the moment you switch holiday mode
-off. On sites with page caching, it can take until the cache next refreshes
-for the notice to appear or disappear for logged-out visitors. Site owners
-can reword or remove the notice with the
-`holiday_mode_for_hivepress_vendor_notice` filter.
+Yes. While holiday mode is on, your public vendor profile replaces the usual
+empty "Nothing found" message with an "Away on holiday" notice in exactly
+the same style, letting buyers know you may take longer than usual to
+reply. It disappears the moment you switch holiday mode off. On sites with
+page caching, it can take until the cache next refreshes for the notice to
+appear or disappear for logged-out visitors. Site owners can reword or
+remove the notice with the `holiday_mode_for_hivepress_vendor_notice`
+filter.
 
 = What happens to my products and bookings while I am away? =
 
@@ -138,6 +139,17 @@ cancelled. Your per-listing Statistics page is unavailable while a listing
 is hidden and returns when it is restored.
 
 == Changelog ==
+
+= 1.4.2 =
+* Changed: on the vendor's profile page, the away notice now replaces the
+  "Nothing found" empty-listings message entirely, using its exact heading
+  and paragraph styling, so buyers see one clear explanation instead of an
+  empty-search message.
+
+= 1.4.1 =
+* Changed: the vendor profile "Away on holiday" notice now sits in the main
+  content area directly below the "Listings by ..." heading rather than in
+  the sidebar, at full text size, with clearer spacing below the pill.
 
 = 1.4.0 =
 * Added: a public "Away on holiday" notice on the vendor's profile page

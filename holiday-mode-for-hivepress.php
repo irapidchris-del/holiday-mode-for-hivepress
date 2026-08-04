@@ -3,7 +3,7 @@
  * Plugin Name:       Holiday Mode for HivePress
  * Plugin URI:        https://community.hivepress.io/u/chrisb/summary
  * Description:       Vendor-only Holiday Mode toggle that hides (drafts) and restores all of a vendor's listings, with an on-site banner while active. Restoring listings requires an active WooCommerce Subscription (admins bypass; sites without WooCommerce Subscriptions are not gated).
- * Version:           1.4.0
+ * Version:           1.4.2
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Requires Plugins:  hivepress
@@ -384,22 +384,20 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				return $blocks;
 			}
 
-			// Injected only while holiday mode is on, so an absent notice is
-			// truly absent rather than hidden. Order 15 places it under the
-			// vendor summary card and above the attribute and action blocks.
+			// While holiday mode is on every visible listing is drafted, so
+			// the results container can only ever render core's "Nothing
+			// found" fallback here. Swap the container for our callback, so
+			// the vendor's away message appears in that exact place and
+			// style instead of a confusing empty-search message. Merging
+			// overwrites the block type while keeping its position.
 			return hivepress()->template->merge_blocks(
 				$blocks,
 				[
-					'page_sidebar' => [
-						'blocks' => [
-							'holiday_mode_for_hivepress_vendor_notice' => [
-								'type'     => 'callback',
-								'callback' => 'holiday_mode_for_hivepress_vendor_notice',
-								'params'   => [ $user_id ],
-								'return'   => true,
-								'_order'   => 15,
-							],
-						],
+					'listings_container' => [
+						'type'     => 'callback',
+						'callback' => 'holiday_mode_for_hivepress_vendor_notice',
+						'params'   => [ $user_id ],
+						'return'   => true,
 					],
 				]
 			);
@@ -802,14 +800,17 @@ if ( ! function_exists( 'holiday_mode_for_hivepress_vendor_notice' ) ) {
 			return '';
 		}
 
-		$output = '<div class="holiday-mode-for-hivepress-vendor-notice hp-widget widget widget--sidebar">';
+		// Mirrors core's templates/page/no-results-message.php exactly
+		// (`.hp-no-results` with an h2 and a paragraph), so every theme
+		// styles the away message precisely like the message it replaces.
+		$output = '<div class="hp-no-results holiday-mode-for-hivepress-vendor-notice">';
 
 		if ( ! empty( $notice['title'] ) ) {
-			$output .= '<strong class="hp-status hp-status--pending"><span>' . esc_html( $notice['title'] ) . '</span></strong>';
+			$output .= '<h2>' . esc_html( $notice['title'] ) . '</h2>';
 		}
 
 		if ( ! empty( $notice['message'] ) ) {
-			$output .= '<p class="hp-meta">' . esc_html( $notice['message'] ) . '</p>';
+			$output .= '<p>' . esc_html( $notice['message'] ) . '</p>';
 		}
 
 		return $output . '</div>';
