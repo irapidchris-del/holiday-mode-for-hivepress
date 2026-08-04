@@ -2,9 +2,9 @@
 Contributors: chrisb
 Tags: hivepress, marketplace, vendor, listings, holiday
 Requires at least: 6.0
-Tested up to: 6.6
+Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 1.1.0
+Stable tag: 1.3.2
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,7 +31,7 @@ Restoring listings can be gated behind a membership requirement:
 * Administrators can always restore.
 * By default, a user with an **active WooCommerce Subscription** can restore.
 * On sites where WooCommerce Subscriptions is **not** installed, restoring is
-  **not** gated — vendors are never trapped by a system that isn't present.
+  **not** gated, so vendors are never trapped by a system that isn't present.
 
 If a vendor without an active subscription tries to switch holiday mode off,
 the change is refused and an explanatory message is shown; their listings stay
@@ -66,8 +66,8 @@ row on the Plugins page. Update checks are cached for 6 hours.
 3. Make sure HivePress is installed and active. Vendors will find the
    "Holiday mode" toggle under Account → Settings.
 
-Once installed, future versions can be updated in place from the Plugins screen
-— no need to download the ZIP again.
+Once installed, future versions can be updated in place from the Plugins
+screen, with no need to download the ZIP again.
 
 == Frequently Asked Questions ==
 
@@ -103,6 +103,57 @@ stranded in draft.
 
 == Changelog ==
 
+= 1.3.2 =
+* Improved: switching holiday mode off now removes the stored flag entirely
+  instead of leaving an empty database row behind for each user.
+
+= 1.3.1 =
+* Fixed: the checkbox description claimed listings are restored only if a
+  "membership or subscription" is active. The bundled restore gate checks a
+  WooCommerce Subscription only, so the description now says exactly that,
+  and only on sites where WooCommerce Subscriptions is installed. Sites
+  without it see no mention of a gate, because none applies.
+
+= 1.3.0 =
+* Added: a translation template (languages folder), so every string can be
+  reworded or translated with Loco Translate or a similar tool.
+* Changed: translations now load through WordPress itself, matching how the
+  official HivePress extensions handle them.
+* Changed: the banner now follows the HivePress sizing conventions, so its
+  spacing and text scale with the active theme.
+* Fixed: on sites running the HivePress Badges extension, restoring listings
+  no longer counts each restored listing as a newly submitted one, so holiday
+  cycles cannot inflate "listings submitted" badge counts.
+* Fixed: the settings checkbox is now added only when the settings form
+  instance is confirmed, closing a theoretical route for the field to appear
+  through third-party code.
+
+= 1.2.2 =
+* Changed: the holiday mode checkbox is now registered as a form-only field,
+  so it can never clash with an admin-defined user attribute of the same name
+  or be saved through the user profile itself.
+
+= 1.2.1 =
+* Added: a "Holiday mode" column on the Listings screen in wp-admin, so site
+  owners can see at a glance which drafts are listings hidden by holiday mode
+  and which status each one returns to.
+
+= 1.2.0 =
+* Fixed: switching holiday mode off from the settings form had no effect.
+  Browsers do not submit unticked checkboxes, so the plugin never saw the
+  change; the setting is now read correctly and listings are restored as
+  intended. This also means the subscription check now runs when switching
+  off, so its explanatory message appears when a subscription is not active.
+* Fixed: listings created directly with a visible status while holiday mode
+  is on are now hidden as well.
+* Changed: the checkbox now shows a short caption beside the box instead of
+  repeating the field label.
+* Changed: clearer wording for the checkbox description and the subscription
+  message.
+* Fixed: the update checker's cached release details are now removed on
+  uninstall.
+* Tested up to WordPress 7.0.
+
 = 1.1.0 =
 * Added: automatic updates direct from the plugin's GitHub releases, plus a
   "Check for updates" link on the plugin's row on the Plugins screen.
@@ -125,7 +176,7 @@ stranded in draft.
 * Added: `uninstall.php` that restores hidden listings and cleans up plugin data.
 * Improved: sites without WooCommerce Subscriptions are no longer gated, so
   vendors cannot be permanently locked out of restoring their listings.
-* Improved: internationalization — all strings (including the banner) are now
+* Improved: internationalisation, with all strings (including the banner) now
   translatable under the plugin's own text domain.
 * Improved: banner accessibility and readability; the toggle now sits in a
   sensible position within the settings form.
@@ -134,6 +185,10 @@ stranded in draft.
 * Initial release.
 
 == Upgrade Notice ==
+
+= 1.2.0 =
+Critical fix: switching holiday mode off now works. On 1.1.0 the setting could
+be switched on but never off, leaving listings hidden. Upgrade immediately.
 
 = 1.1.0 =
 Important reliability fixes: holiday mode is no longer toggled by unrelated

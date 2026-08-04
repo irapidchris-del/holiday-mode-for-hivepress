@@ -234,7 +234,9 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress_Updater' ) ) :
 		 * @return object|array|false
 		 */
 		public function get_plugin_information( $result, $action, $args ) {
-			if ( 'plugin_information' !== $action || ! is_object( $args ) || $this->slug !== ( isset( $args->slug ) ? $args->slug : '' ) ) {
+			$slug = isset( $args->slug ) ? $args->slug : '';
+
+			if ( 'plugin_information' !== $action || ! is_object( $args ) || $slug !== $this->slug ) {
 				return $result;
 			}
 
@@ -371,7 +373,9 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress_Updater' ) ) :
 		public function fix_update_directory( $source, $remote_source, $upgrader, $hook_extra = [] ) {
 			global $wp_filesystem;
 
-			if ( $this->basename !== ( isset( $hook_extra['plugin'] ) ? $hook_extra['plugin'] : '' ) || ! $wp_filesystem ) {
+			$plugin = isset( $hook_extra['plugin'] ) ? $hook_extra['plugin'] : '';
+
+			if ( $plugin !== $this->basename || ! $wp_filesystem ) {
 				return $source;
 			}
 
