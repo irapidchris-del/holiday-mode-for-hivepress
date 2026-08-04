@@ -3,7 +3,7 @@
  * Plugin Name:       Holiday Mode for HivePress
  * Plugin URI:        https://community.hivepress.io/u/chrisb/summary
  * Description:       Vendor-only Holiday Mode toggle that hides (drafts) and restores all of a vendor's listings, with an on-site banner while active. Restoring listings requires an active WooCommerce Subscription (admins bypass; sites without WooCommerce Subscriptions are not gated).
- * Version:           1.1.0
+ * Version:           1.3.2
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Requires Plugins:  hivepress
@@ -12,7 +12,7 @@
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain:       holiday-mode-for-hivepress
- * Domain Path:       /languages
+ * Domain Path:       /languages/
  * Update URI:        https://github.com/irapidchris-del/holiday-mode-for-hivepress
  *
  * @package Holiday_Mode_For_HivePress
@@ -26,7 +26,7 @@ if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_REPO' ) ) {
 	define( 'HOLIDAY_MODE_FOR_HIVEPRESS_REPO', 'irapidchris-del/holiday-mode-for-hivepress' );
 }
 
-require_once __DIR__ . '/includes/class-updater.php';
+require_once __DIR__ . '/includes/class-holiday-mode-for-hivepress-updater.php';
 
 if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 
@@ -113,10 +113,14 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			add_filter( 'hivepress/v1/forms/user_update/errors', [ $this, 'validate_toggle' ], 1000, 2 );
 
 			// Apply the toggle once the user model actually saves.
-			add_action( 'hivepress/v1/models/user/update', [ $this, 'apply_toggle' ], 1000, 2 );
+			add_action( 'hivepress/v1/models/user/update', [ $this, 'apply_toggle' ], 1000 );
 
 			// While holiday mode is on, keep any newly visible listing hidden.
-			add_action( 'hivepress/v1/models/listing/update', [ $this, 'enforce_draft_while_holiday' ], 1000, 2 );
+			// Both hooks are needed: HivePress fires `create` for listings
+			// inserted directly with a visible status and `update` for every
+			// later save.
+			add_action( 'hivepress/v1/models/listing/create', [ $this, 'enforce_draft_while_holiday' ], 1000 );
+			add_action( 'hivepress/v1/models/listing/update', [ $this, 'enforce_draft_while_holiday' ], 1000 );
 
 			// Membership rule: admins bypass, else an active Woo Subscription is
 			// required to restore. Sites without Woo Subscriptions are not gated.
@@ -125,17 +129,12 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			// Banner on account pages while holiday mode is active.
 			add_action( 'wp_footer', [ $this, 'maybe_print_banner' ], 1000 );
 
-			// Translations for self-distributed copies.
-			add_action( 'init', [ $this, 'load_textdomain' ] );
-		}
+			if ( is_admin() ) {
 
-		/**
-		 * Loads the plugin text domain.
-		 *
-		 * @return void
-		 */
-		public function load_textdomain() {
-			load_plugin_textdomain( 'holiday-mode-for-hivepress', false, dirname( plugin_basename( __FILE__ ) ) . '/languages' );
+				// Show admins why a vendor's listings are drafts.
+				add_filter( 'manage_hp_listing_posts_columns', [ $this, 'add_listing_admin_columns' ] );
+				add_action( 'manage_hp_listing_posts_custom_column', [ $this, 'render_listing_admin_columns' ], 10, 2 );
+			}
 		}
 
 		/* ---------------- UI: field ---------------- */
@@ -152,7 +151,10 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		 * @return array
 		 */
 		public function extend_settings_form( $form, $form_object = null ) {
-			if ( is_object( $form_object ) && 'HivePress\Forms\User_Update' !== get_class( $form_object ) ) {
+			// Fail closed: only the exact User_Update instance receives the
+			// field, so a third-party apply_filters() call without the form
+			// object cannot pick it up either.
+			if ( ! is_object( $form_object ) || 'HivePress\Forms\User_Update' !== get_class( $form_object ) ) {
 				return $form;
 			}
 
@@ -170,11 +172,28 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				$form['fields'] = [];
 			}
 
+			// Mention the restore gate only where one will actually apply:
+			// the bundled gate needs WooCommerce Subscriptions, and promising
+			// a "membership" check the plugin never performs misleads vendors
+			// (found on staging, 2026-08-04).
+			$description = __( 'Turn this on to hide all of your listings until you switch it off.', 'holiday-mode-for-hivepress' );
+
+			if ( function_exists( 'wcs_user_has_subscription' ) ) {
+				$description .= ' ' . __( 'Your listings are restored when you switch it off, as long as your subscription is active at that time.', 'holiday-mode-for-hivepress' );
+			}
+
 			$form['fields'][ self::FIELD ] = [
 				'label'       => __( 'Holiday mode (hide all listings)', 'holiday-mode-for-hivepress' ),
-				'description' => __( 'Enable to hide all of your listings until you turn it off. When disabling, your listings are restored only if your membership/subscription is active.', 'holiday-mode-for-hivepress' ),
+				'caption'     => __( 'Hide all of my listings while I am away', 'holiday-mode-for-hivepress' ),
+				'description' => $description,
 				'type'        => 'checkbox',
 				'default'     => (bool) get_user_meta( $user_id, self::USER_META_KEY, true ),
+
+				// Form-only field: never merge with a same-named user model
+				// field (an admin-defined user attribute could create one) and
+				// never persist through the model save. Same pattern as core's
+				// current_password field.
+				'_separate'   => true,
 				'_order'      => 330,
 			];
 
@@ -201,9 +220,15 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				return $errors;
 			}
 
-			// null => the field is not part of this form; false/true => submitted value.
-			$value = $form->get_value( self::FIELD );
-			if ( null === $value ) {
+			// Browsers do not submit unticked checkboxes at all, and HivePress
+			// keeps an absent value as null, so the submitted state cannot be
+			// read from the value alone. The field is registered on this form
+			// only for vendors and admins, so its presence is the reliable
+			// signal that the toggle belongs to this submission; a null value
+			// then simply means the box was unticked.
+			$fields = $form->get_fields();
+
+			if ( ! isset( $fields[ self::FIELD ] ) ) {
 				return $errors;
 			}
 
@@ -212,7 +237,15 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				return $errors;
 			}
 
-			$submitted = (bool) $value;
+			// Act only on the user's own settings form, not on an admin
+			// updating another user through the same endpoint.
+			$model = $form->get_model();
+
+			if ( $model && $model->get_id() && (int) $model->get_id() !== (int) $user_id ) {
+				return $errors;
+			}
+
+			$submitted = (bool) $form->get_value( self::FIELD );
 			$previous  = (bool) get_user_meta( $user_id, self::USER_META_KEY, true );
 
 			if ( $submitted === $previous ) {
@@ -234,7 +267,7 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				if ( ! $can_restore ) {
 					// Refuse the switch-off so state stays consistent (flag on,
 					// banner on, listings hidden) and tell the vendor why.
-					$errors[] = esc_html__( 'Your subscription is not active, so holiday mode cannot be switched off yet — your listings would remain hidden. Please renew your subscription to restore them.', 'holiday-mode-for-hivepress' );
+					$errors[] = esc_html__( 'Your subscription is not active, so holiday mode cannot be switched off yet and your listings stay hidden. Please renew your subscription to restore them.', 'holiday-mode-for-hivepress' );
 					return $errors;
 				}
 			}
@@ -250,11 +283,10 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		/**
 		 * Applies a validated toggle once the user model has actually saved.
 		 *
-		 * @param int   $user_id The saved user ID.
-		 * @param mixed $model   Unused (HivePress passes the model name).
+		 * @param int $user_id The saved user ID.
 		 * @return void
 		 */
-		public function apply_toggle( $user_id, $model = null ) {
+		public function apply_toggle( $user_id ) {
 			if ( empty( $this->pending_toggle ) ) {
 				return;
 			}
@@ -265,11 +297,14 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			$enable               = (bool) $this->pending_toggle['enable'];
 			$this->pending_toggle = null;
 
-			update_user_meta( $user_id, self::USER_META_KEY, $enable );
-
 			if ( $enable ) {
+				update_user_meta( $user_id, self::USER_META_KEY, true );
 				$this->bulk_set_draft( $user_id );
 			} else {
+				// Delete the flag rather than storing an empty value, so
+				// switching off leaves no meta row behind (stale empty rows
+				// were observed accumulating on staging, 2026-08-04).
+				delete_user_meta( $user_id, self::USER_META_KEY );
 				$this->bulk_restore( $user_id );
 			}
 		}
@@ -280,11 +315,10 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		 * Keeps a vendor's listings hidden while holiday mode is on: any listing
 		 * that becomes visible (or is scheduled) is pushed back to draft.
 		 *
-		 * @param int   $listing_id The listing post ID.
-		 * @param mixed $listing    Unused.
+		 * @param int $listing_id The listing post ID.
 		 * @return void
 		 */
-		public function enforce_draft_while_holiday( $listing_id, $listing = null ) {
+		public function enforce_draft_while_holiday( $listing_id ) {
 			if ( $this->suspend_enforce ) {
 				return;
 			}
@@ -315,6 +349,60 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				]
 			);
 			$this->suspend_enforce = false;
+		}
+
+		/* ---------------- Admin columns ---------------- */
+
+		/**
+		 * Adds the holiday-mode column to the listings screen in wp-admin.
+		 *
+		 * @param array $columns Admin columns.
+		 * @return array
+		 */
+		public function add_listing_admin_columns( $columns ) {
+			return array_merge(
+				array_slice( $columns, 0, 3, true ),
+				[
+					'holiday_mode_for_hivepress' => esc_html__( 'Holiday mode', 'holiday-mode-for-hivepress' ),
+				],
+				array_slice( $columns, 3, null, true )
+			);
+		}
+
+		/**
+		 * Renders the holiday-mode column for a listing.
+		 *
+		 * @param string $column Column name.
+		 * @param int    $listing_id Listing ID.
+		 */
+		public function render_listing_admin_columns( $column, $listing_id ) {
+			if ( 'holiday_mode_for_hivepress' !== $column ) {
+				return;
+			}
+
+			$output = '&mdash;';
+
+			// Only a draft carrying our previous-status meta, whose author still
+			// has holiday mode on, is hidden by this plugin; anything else is an
+			// ordinary listing.
+			$prev = get_post_meta( $listing_id, self::LISTING_META_PREV, true );
+
+			if ( $prev && 'draft' === get_post_status( $listing_id ) ) {
+				$user_id = (int) get_post_field( 'post_author', $listing_id );
+
+				if ( $user_id && get_user_meta( $user_id, self::USER_META_KEY, true ) ) {
+					$status = get_post_status_object( $prev );
+
+					$output = '<span title="' . esc_attr__( 'This listing is restored automatically when the vendor switches holiday mode off.', 'holiday-mode-for-hivepress' ) . '">';
+
+					/* translators: %s: the status the listing returns to when holiday mode is switched off. */
+					$output .= sprintf( esc_html__( 'Hidden (was %s)', 'holiday-mode-for-hivepress' ), esc_html( $status ? $status->label : $prev ) );
+
+					$output .= '</span>';
+				}
+			}
+
+			echo $output; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
 		}
 
 		/* ---------------- Vendor detection ---------------- */
@@ -424,6 +512,17 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		private function bulk_restore( $user_id ) {
 			$listing_ids = $this->get_vendor_listings( $user_id, 'any', true );
 
+			// The Badges extension counts every transition TO publish/pending
+			// as a new submission (+1 to its listings_submitted counter, with
+			// no decrement anywhere), so restoring a portfolio would inflate
+			// badge counters on every holiday cycle. Stand its listener down
+			// for the duration of the restore loop.
+			$badges = ( function_exists( 'hivepress' ) && hivepress()->get_version( 'badges' ) ) ? hivepress()->badge : null;
+
+			if ( $badges ) {
+				remove_action( 'hivepress/v1/models/listing/update_status', [ $badges, 'update_listing_status' ], 10 );
+			}
+
 			$this->suspend_enforce = true;
 			foreach ( $listing_ids as $listing_id ) {
 				$prev = get_post_meta( $listing_id, self::LISTING_META_PREV, true );
@@ -441,6 +540,10 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				delete_post_meta( $listing_id, self::LISTING_META_PREV );
 			}
 			$this->suspend_enforce = false;
+
+			if ( $badges ) {
+				add_action( 'hivepress/v1/models/listing/update_status', [ $badges, 'update_listing_status' ], 10, 4 );
+			}
 		}
 
 		/**
@@ -497,7 +600,7 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				return true;
 			}
 
-			if ( wcs_user_has_subscription( $user_id, '', 'active' ) ) {
+			if ( wcs_user_has_subscription( $user_id, 0, 'active' ) ) {
 				return true;
 			}
 
@@ -512,20 +615,21 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		 * @return string
 		 */
 		private function get_account_settings_url() {
+			$url = '';
+
 			if ( function_exists( 'hivepress' ) ) {
 				try {
 					$router = hivepress()->router;
+
 					if ( $router ) {
-						$url = $router->get_url( 'user_edit_settings_page' );
-						if ( $url ) {
-							return $url;
-						}
+						$url = (string) $router->get_url( 'user_edit_settings_page' );
 					}
 				} catch ( \Throwable $e ) {
-					// Fall through to the default below.
+					$url = '';
 				}
 			}
-			return home_url( '/account/settings/' );
+
+			return $url ? $url : home_url( '/account/settings/' );
 		}
 
 		/**
@@ -566,9 +670,8 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				'banner.id="holiday-mode-for-hivepress-banner";' .
 				'banner.setAttribute("role","status");' .
 				'banner.setAttribute("aria-live","polite");' .
-				'banner.style.cssText="position:sticky;top:0;z-index:9999;background:#fff3cd;color:#664d03;border:1px solid #ffeeba;border-left:0;border-right:0;padding:10px 16px;margin-bottom:12px;display:flex;gap:10px;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,.05)";' .
+				'banner.style.cssText="position:sticky;top:0;z-index:9999;box-sizing:border-box;max-width:100%;background:#fff3cd;color:#664d03;border:1px solid #ffeeba;border-left:0;border-right:0;padding:0.5rem 1rem;margin-bottom:1rem;display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,.05)";' .
 				'var strong=document.createElement("strong");' .
-				'strong.style.marginRight="4px";' .
 				'strong.appendChild(document.createTextNode(d.title));' .
 				'var span=document.createElement("span");' .
 				'var parts=String(d.message).split("%s");' .
@@ -581,7 +684,7 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				'var btn=document.createElement("button");' .
 				'btn.type="button";' .
 				'btn.setAttribute("aria-label",d.dismiss);' .
-				'btn.style.cssText="margin-left:auto;cursor:pointer;background:transparent;border:0;color:inherit;font-size:18px;line-height:1";' .
+				'btn.style.cssText="margin-left:auto;cursor:pointer;background:transparent;border:0;color:inherit;font-size:120%;line-height:1";' .
 				'btn.appendChild(document.createTextNode("×"));' .
 				'btn.addEventListener("click",function(){if(banner.parentNode){banner.parentNode.removeChild(banner);}});' .
 				'banner.appendChild(strong);banner.appendChild(span);banner.appendChild(btn);' .
