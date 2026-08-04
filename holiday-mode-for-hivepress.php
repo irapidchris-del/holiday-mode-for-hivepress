@@ -3,7 +3,7 @@
  * Plugin Name:       Holiday Mode for HivePress
  * Plugin URI:        https://community.hivepress.io/u/chrisb/summary
  * Description:       Vendor-only Holiday Mode toggle that hides (drafts) and restores all of a vendor's listings, with an on-site banner while active. Restoring listings requires an active WooCommerce Subscription (admins bypass; sites without WooCommerce Subscriptions are not gated).
- * Version:           1.3.2
+ * Version:           1.3.3
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Requires Plugins:  hivepress
