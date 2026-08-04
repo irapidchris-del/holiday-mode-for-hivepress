@@ -4,7 +4,7 @@ Tags: hivepress, marketplace, vendor, listings, holiday
 Requires at least: 6.0
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 1.3.3
+Stable tag: 1.4.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -45,6 +45,9 @@ hidden and holiday mode stays on until the subscription is active again.
   Memberships).
 * `holiday_mode_for_hivepress_is_vendor` ( bool $is_vendor, int $user_id )
   Return true to treat a user as a vendor (who then sees the toggle).
+* `holiday_mode_for_hivepress_vendor_notice` ( array $notice, int $user_id )
+  Change the `title` and `message` of the public "away" notice shown on the
+  vendor's profile page, or return an empty value to remove it.
 
 = Automatic updates =
 
@@ -101,14 +104,30 @@ On uninstall, any listings still hidden by the plugin are restored to their
 previous status and all of the plugin's data is removed, so nothing is left
 stranded in draft.
 
-= What if a listing would expire while it is hidden? =
+= Does holiday mode give my listings extra time before they expire? =
 
-Nothing happens while it is hidden, because HivePress only expires listings
-that are visible. When you switch holiday mode off, the listing is restored
-and then expires as normal, usually within the hour, and you get the usual
-renewal email. In other words the expiry is not cancelled by holiday mode,
-just delayed until you are back. If you are away for longer than your
-listing expiration period, expect a renewal email shortly after you return.
+No. Holiday mode never changes a listing's expiry date. The date is set when
+the listing is first published and holiday mode does not touch it, so the
+clock keeps running for the whole time you are away.
+
+If the expiry date passes while your listings are hidden, they are already
+expired when you come back: they are restored, then the usual HivePress
+expiry runs within the hour, returns them to draft and sends you the normal
+renewal email. Taking a holiday is not a way to get more days out of a
+listing.
+
+Site owners charging for listings can rely on this: a vendor cannot use
+holiday mode to pause a paid listing period or a subscription term.
+
+= Do buyers know that I am away? =
+
+Yes. While holiday mode is on, your public vendor profile shows a small
+"Away on holiday" notice under your name, letting buyers know you may take
+longer than usual to reply. It disappears the moment you switch holiday mode
+off. On sites with page caching, it can take until the cache next refreshes
+for the notice to appear or disappear for logged-out visitors. Site owners
+can reword or remove the notice with the
+`holiday_mode_for_hivepress_vendor_notice` filter.
 
 = What happens to my products and bookings while I am away? =
 
@@ -120,10 +139,17 @@ is hidden and returns when it is restored.
 
 == Changelog ==
 
+= 1.4.0 =
+* Added: a public "Away on holiday" notice on the vendor's profile page
+  while holiday mode is on, so buyers know the vendor may take longer than
+  usual to reply. Styled entirely with HivePress's own classes, so it
+  matches every official theme, and removable or rewordable via the
+  `holiday_mode_for_hivepress_vendor_notice` filter.
+
 = 1.3.3 =
-* Added: answers in the readme covering what happens to a listing that would
-  expire while it is hidden, and to products, bookings and statistics while
-  you are away. No functional change.
+* Added: answers in the readme confirming that holiday mode never extends a
+  listing's expiry date, and covering what happens to products, bookings and
+  statistics while you are away. No functional change.
 
 = 1.3.2 =
 * Improved: switching holiday mode off now removes the stored flag entirely
