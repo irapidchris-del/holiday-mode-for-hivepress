@@ -4,7 +4,7 @@ Tags: hivepress, marketplace, vendor, listings, holiday
 Requires at least: 6.0
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 1.3.2
+Stable tag: 1.3.3
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -101,7 +101,29 @@ On uninstall, any listings still hidden by the plugin are restored to their
 previous status and all of the plugin's data is removed, so nothing is left
 stranded in draft.
 
+= What if a listing would expire while it is hidden? =
+
+Nothing happens while it is hidden, because HivePress only expires listings
+that are visible. When you switch holiday mode off, the listing is restored
+and then expires as normal, usually within the hour, and you get the usual
+renewal email. In other words the expiry is not cancelled by holiday mode,
+just delayed until you are back. If you are away for longer than your
+listing expiration period, expect a renewal email shortly after you return.
+
+= What happens to my products and bookings while I am away? =
+
+If you sell listings with the Marketplace extension, each hidden listing's
+product is hidden with it, so nobody can buy while you are away, and both
+come back together. Existing bookings and orders are not touched or
+cancelled. Your per-listing Statistics page is unavailable while a listing
+is hidden and returns when it is restored.
+
 == Changelog ==
+
+= 1.3.3 =
+* Added: answers in the readme covering what happens to a listing that would
+  expire while it is hidden, and to products, bookings and statistics while
+  you are away. No functional change.
 
 = 1.3.2 =
 * Improved: switching holiday mode off now removes the stored flag entirely
