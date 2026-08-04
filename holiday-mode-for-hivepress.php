@@ -3,7 +3,7 @@
  * Plugin Name:       Holiday Mode for HivePress
  * Plugin URI:        https://community.hivepress.io/u/chrisb/summary
  * Description:       Vendor-only Holiday Mode toggle that hides (drafts) and restores all of a vendor's listings, with an on-site banner while active. Restoring listings requires an active WooCommerce Subscription (admins bypass; sites without WooCommerce Subscriptions are not gated).
- * Version:           1.3.3
+ * Version:           1.4.0
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Requires Plugins:  hivepress
@@ -128,6 +128,12 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 
 			// Banner on account pages while holiday mode is active.
 			add_action( 'wp_footer', [ $this, 'maybe_print_banner' ], 1000 );
+
+			// Public notice on the vendor's profile page, so buyers know the
+			// vendor is away and may be slower to reply. The `/blocks` variant
+			// is required: it is the only template hook where the vendor
+			// context exists.
+			add_filter( 'hivepress/v1/templates/vendor_view_page/blocks', [ $this, 'add_vendor_notice_block' ], 100, 2 );
 
 			if ( is_admin() ) {
 
@@ -349,6 +355,54 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				]
 			);
 			$this->suspend_enforce = false;
+		}
+
+		/* ---------------- Vendor page notice ---------------- */
+
+		/**
+		 * Adds the "vendor is away" notice to the vendor profile page while
+		 * the vendor has holiday mode switched on.
+		 *
+		 * @param array  $blocks   Template blocks.
+		 * @param object $template Template object, with the vendor context.
+		 * @return array
+		 */
+		public function add_vendor_notice_block( $blocks, $template ) {
+			if ( ! class_exists( '\HivePress\Models\Vendor' ) || ! is_object( $template ) ) {
+				return $blocks;
+			}
+
+			$vendor = $template->get_context( 'vendor' );
+
+			if ( ! $vendor instanceof \HivePress\Models\Vendor ) {
+				return $blocks;
+			}
+
+			$user_id = (int) $vendor->get_user__id();
+
+			if ( ! $user_id || ! get_user_meta( $user_id, self::USER_META_KEY, true ) ) {
+				return $blocks;
+			}
+
+			// Injected only while holiday mode is on, so an absent notice is
+			// truly absent rather than hidden. Order 15 places it under the
+			// vendor summary card and above the attribute and action blocks.
+			return hivepress()->template->merge_blocks(
+				$blocks,
+				[
+					'page_sidebar' => [
+						'blocks' => [
+							'holiday_mode_for_hivepress_vendor_notice' => [
+								'type'     => 'callback',
+								'callback' => 'holiday_mode_for_hivepress_vendor_notice',
+								'params'   => [ $user_id ],
+								'return'   => true,
+								'_order'   => 15,
+							],
+						],
+					],
+				]
+			);
 		}
 
 		/* ---------------- Admin columns ---------------- */
@@ -712,6 +766,53 @@ if ( ! function_exists( 'holiday_mode_for_hivepress' ) ) {
 			return Holiday_Mode_For_HivePress::instance();
 		}
 		return null;
+	}
+}
+
+if ( ! function_exists( 'holiday_mode_for_hivepress_vendor_notice' ) ) {
+	/**
+	 * Renders the public "vendor is away" notice for a vendor profile page.
+	 *
+	 * A named function because HivePress's Callback block only accepts one.
+	 * All markup reuses core classes (widget card, `hp-status` pill,
+	 * `hp-meta` text) so every theme styles it natively with no CSS of ours.
+	 *
+	 * @param int $user_id The vendor's user ID.
+	 * @return string
+	 */
+	function holiday_mode_for_hivepress_vendor_notice( $user_id ) {
+		/**
+		 * Filters the public vendor-away notice. Return an empty value to
+		 * remove the notice entirely, or change the `title` (the status
+		 * pill) and `message` (the text under it).
+		 *
+		 * @param array $notice  Notice strings: `title`, `message`.
+		 * @param int   $user_id The vendor's user ID.
+		 */
+		$notice = apply_filters(
+			'holiday_mode_for_hivepress_vendor_notice',
+			[
+				'title'   => __( 'Away on holiday', 'holiday-mode-for-hivepress' ),
+				'message' => __( 'This vendor is taking a break at the moment, so they may take longer than usual to reply.', 'holiday-mode-for-hivepress' ),
+			],
+			$user_id
+		);
+
+		if ( empty( $notice ) || ! is_array( $notice ) ) {
+			return '';
+		}
+
+		$output = '<div class="holiday-mode-for-hivepress-vendor-notice hp-widget widget widget--sidebar">';
+
+		if ( ! empty( $notice['title'] ) ) {
+			$output .= '<strong class="hp-status hp-status--pending"><span>' . esc_html( $notice['title'] ) . '</span></strong>';
+		}
+
+		if ( ! empty( $notice['message'] ) ) {
+			$output .= '<p class="hp-meta">' . esc_html( $notice['message'] ) . '</p>';
+		}
+
+		return $output . '</div>';
 	}
 }
 
