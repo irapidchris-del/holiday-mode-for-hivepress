@@ -2,8 +2,8 @@
 /**
  * Plugin Name:       Holiday Mode for HivePress
  * Plugin URI:        https://community.hivepress.io/u/chrisb/summary
- * Description:       Vendor-only Holiday Mode toggle that hides (drafts) and restores all of a vendor's listings, with an on-site banner while active. Restoring listings requires an active WooCommerce Subscription (admins bypass; sites without WooCommerce Subscriptions are not gated).
- * Version:           1.4.2
+ * Description:       Vendor-only Holiday Mode toggle that hides (drafts) and restores all of a vendor's listings, with an on-site banner while active and an away notice on the vendor's public profile. Restoring is entitlement-aware: it respects each listing's own expiry date, and any HivePress Membership or WooCommerce Subscription the vendor actually holds.
+ * Version:           1.5.0
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Requires Plugins:  hivepress
@@ -121,10 +121,6 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			// later save.
 			add_action( 'hivepress/v1/models/listing/create', [ $this, 'enforce_draft_while_holiday' ], 1000 );
 			add_action( 'hivepress/v1/models/listing/update', [ $this, 'enforce_draft_while_holiday' ], 1000 );
-
-			// Membership rule: admins bypass, else an active Woo Subscription is
-			// required to restore. Sites without Woo Subscriptions are not gated.
-			add_filter( 'holiday_mode_for_hivepress_has_active_membership', [ $this, 'membership_gate_wcs' ], 10, 2 );
 
 			// Banner on account pages while holiday mode is active.
 			add_action( 'wp_footer', [ $this, 'maybe_print_banner' ], 1000 );
@@ -259,21 +255,12 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			}
 
 			if ( ! $submitted ) {
-				/**
-				 * Filters whether the user may restore (un-hide) their listings.
-				 *
-				 * @param bool $has_access Default false; the bundled handler
-				 *                          grants access to admins, to users with
-				 *                          an active WooCommerce Subscription, and
-				 *                          on sites without Woo Subscriptions.
-				 * @param int  $user_id    The user being evaluated.
-				 */
-				$can_restore = (bool) apply_filters( 'holiday_mode_for_hivepress_has_active_membership', false, $user_id );
+				$entitlement = $this->get_entitlement( $user_id );
 
-				if ( ! $can_restore ) {
+				if ( ! $entitlement['allowed'] ) {
 					// Refuse the switch-off so state stays consistent (flag on,
 					// banner on, listings hidden) and tell the vendor why.
-					$errors[] = esc_html__( 'Your subscription is not active, so holiday mode cannot be switched off yet and your listings stay hidden. Please renew your subscription to restore them.', 'holiday-mode-for-hivepress' );
+					$errors[] = $entitlement['message'];
 					return $errors;
 				}
 			}
@@ -302,6 +289,18 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 
 			$enable               = (bool) $this->pending_toggle['enable'];
 			$this->pending_toggle = null;
+
+			// Re-check the gate here, not just during validation: the form can
+			// fail after our validation ran (the current-password check happens
+			// later in the controller), which leaves the recorded intent behind
+			// for the rest of the request.
+			if ( ! $enable ) {
+				$entitlement = $this->get_entitlement( $user_id );
+
+				if ( ! $entitlement['allowed'] ) {
+					return;
+				}
+			}
 
 			if ( $enable ) {
 				update_user_meta( $user_id, self::USER_META_KEY, true );
@@ -564,15 +563,31 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		private function bulk_restore( $user_id ) {
 			$listing_ids = $this->get_vendor_listings( $user_id, 'any', true );
 
-			// The Badges extension counts every transition TO publish/pending
-			// as a new submission (+1 to its listings_submitted counter, with
-			// no decrement anywhere), so restoring a portfolio would inflate
-			// badge counters on every holiday cycle. Stand its listener down
-			// for the duration of the restore loop.
-			$badges = ( function_exists( 'hivepress' ) && hivepress()->get_version( 'badges' ) ) ? hivepress()->badge : null;
+			// Two extensions treat any transition to publish/pending as a brand
+			// new submission, so a restore would be billed as one. Stand both
+			// listeners down for the loop: hiding and restoring must be neutral
+			// in every ledger.
+			//
+			// Badges counts +1 towards its listings_submitted total, with no
+			// decrement anywhere (`badges/includes/components/class-badge.php:357-381`).
+			// Paid Listings is worse: it spends one of the vendor's paid
+			// submissions, deletes the package when the balance hits zero, and
+			// overwrites the listing's expiry with a fresh full period
+			// (`paid-listings/includes/components/class-listing-package.php:95-181`).
+			$suspended = [];
 
-			if ( $badges ) {
-				remove_action( 'hivepress/v1/models/listing/update_status', [ $badges, 'update_listing_status' ], 10 );
+			if ( function_exists( 'hivepress' ) ) {
+				if ( hivepress()->get_version( 'badges' ) && hivepress()->badge ) {
+					$suspended[] = [ hivepress()->badge, 'update_listing_status', 4 ];
+				}
+
+				if ( hivepress()->get_version( 'paid_listings' ) && hivepress()->listing_package ) {
+					$suspended[] = [ hivepress()->listing_package, 'update_user_packages', 3 ];
+				}
+			}
+
+			foreach ( $suspended as $listener ) {
+				remove_action( 'hivepress/v1/models/listing/update_status', [ $listener[0], $listener[1] ], 10 );
 			}
 
 			$this->suspend_enforce = true;
@@ -580,7 +595,7 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				$prev = get_post_meta( $listing_id, self::LISTING_META_PREV, true );
 				$curr = get_post_status( $listing_id );
 
-				if ( 'draft' === $curr && in_array( $prev, self::HIDEABLE, true ) ) {
+				if ( 'draft' === $curr && in_array( $prev, self::HIDEABLE, true ) && ! $this->is_listing_expired( $listing_id ) ) {
 					wp_update_post(
 						[
 							'ID'          => $listing_id,
@@ -593,9 +608,30 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			}
 			$this->suspend_enforce = false;
 
-			if ( $badges ) {
-				add_action( 'hivepress/v1/models/listing/update_status', [ $badges, 'update_listing_status' ], 10, 4 );
+			foreach ( $suspended as $listener ) {
+				add_action( 'hivepress/v1/models/listing/update_status', [ $listener[0], $listener[1] ], 10, $listener[2] );
 			}
+		}
+
+		/**
+		 * Checks whether a listing's own expiry date has already passed.
+		 *
+		 * A listing whose paid period ran out while it was hidden must not come
+		 * back visible, because holiday mode must never buy a listing extra
+		 * time. This mirrors core exactly: its own hide/unhide toggle refuses to
+		 * un-hide an expired draft
+		 * (`hivepress/includes/controllers/class-listing.php:434-436`), and its
+		 * hourly cron would immediately re-draft such a listing anyway
+		 * (`components/class-listing.php:290-326`). Leaving it drafted puts it
+		 * exactly where the vendor's Renew option expects to find it.
+		 *
+		 * @param int $listing_id The listing post ID.
+		 * @return bool
+		 */
+		private function is_listing_expired( $listing_id ) {
+			$expired_time = get_post_meta( $listing_id, 'hp_expired_time', true );
+
+			return '' !== $expired_time && (int) $expired_time && (int) $expired_time < time();
 		}
 
 		/**
@@ -629,34 +665,182 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			return $query->posts;
 		}
 
-		/* ---------------- Membership (Admin bypass + Woo Subscriptions) ---------------- */
+		/* ---------------- Entitlement ---------------- */
 
 		/**
-		 * Default restore-access rule: admins bypass; an active WooCommerce
-		 * Subscription qualifies; sites without Woo Subscriptions are not gated
-		 * (so vendors are never permanently trapped by a system that isn't
-		 * present). Site owners can override via the filter.
+		 * Decides whether a vendor may switch holiday mode off.
 		 *
-		 * @param bool $has_access Incoming value.
-		 * @param int  $user_id    The user being evaluated.
-		 * @return bool
+		 * Only a system that demonstrably governs THIS vendor gets a say. That
+		 * matters because no HivePress monetisation system hides listings when
+		 * entitlement lapses: Memberships only redirects the submit route and
+		 * drafts the membership post itself
+		 * (`memberships/includes/components/class-membership.php:872-917`), and
+		 * Paid Listings only blocks the submit flow. So a vendor outside every
+		 * system, or on a site that merely has one installed, must never be
+		 * blocked: their listings would still be visible had they never used
+		 * holiday mode at all, and blocking would eventually cost them the
+		 * listings entirely once the storage period trashes expired drafts.
+		 *
+		 * Enrolment, not mere installation, is what confers jurisdiction.
+		 *
+		 * @param int $user_id The user being evaluated.
+		 * @return array `allowed` (bool), `reason` (string) and `message` (string).
 		 */
-		public function membership_gate_wcs( $has_access, $user_id ) {
-			$user = get_user_by( 'id', $user_id );
-			if ( $user && in_array( 'administrator', (array) $user->roles, true ) ) {
-				return true;
+		public function get_entitlement( $user_id ) {
+			$user_id = (int) $user_id;
+
+			$entitlement = [
+				'allowed' => true,
+				'reason'  => 'ungoverned',
+				'message' => '',
+			];
+
+			// Anyone who can edit others' listings bypasses every gate. This is
+			// the capability the whole ecosystem uses for exactly this purpose
+			// (`memberships/includes/components/class-membership.php:2190`).
+			if ( user_can( $user_id, 'edit_others_posts' ) ) {
+				$entitlement['reason'] = 'bypass';
+
+				return $this->filter_entitlement( $entitlement, $user_id );
 			}
 
-			// No subscription system installed: don't gate restores at all.
+			foreach ( [ 'memberships', 'subscriptions' ] as $system ) {
+				$verdict = call_user_func( [ $this, 'check_' . $system ], $user_id );
+
+				if ( is_null( $verdict ) ) {
+					// This system does not govern the vendor: no opinion.
+					continue;
+				}
+
+				if ( $verdict ) {
+					$entitlement['reason'] = $system . '_active';
+
+					return $this->filter_entitlement( $entitlement, $user_id );
+				}
+
+				$entitlement['allowed'] = false;
+				$entitlement['reason']  = $system . '_lapsed';
+
+				if ( 'memberships' === $system ) {
+					$entitlement['message'] = esc_html__( 'Your membership is not active, so holiday mode cannot be switched off yet and your listings stay hidden. Please renew your membership to restore them.', 'holiday-mode-for-hivepress' );
+				} else {
+					$entitlement['message'] = esc_html__( 'Your subscription is not active, so holiday mode cannot be switched off yet and your listings stay hidden. Please renew your subscription to restore them.', 'holiday-mode-for-hivepress' );
+				}
+
+				break;
+			}
+
+			return $this->filter_entitlement( $entitlement, $user_id );
+		}
+
+		/**
+		 * Applies the public entitlement filters and normalises the result.
+		 *
+		 * @param array $entitlement The computed entitlement.
+		 * @param int   $user_id     The user being evaluated.
+		 * @return array
+		 */
+		private function filter_entitlement( $entitlement, $user_id ) {
+			/**
+			 * Filters whether the user may restore (un-hide) their listings.
+			 *
+			 * Kept for backwards compatibility: it receives, and can override,
+			 * the decision the bundled entitlement checks reached.
+			 *
+			 * @param bool $has_access Whether the restore is currently allowed.
+			 * @param int  $user_id    The user being evaluated.
+			 */
+			$entitlement['allowed'] = (bool) apply_filters( 'holiday_mode_for_hivepress_has_active_membership', $entitlement['allowed'], $user_id );
+
+			/**
+			 * Filters the full entitlement decision behind switching holiday
+			 * mode off, so a site can add its own membership system.
+			 *
+			 * @param array $entitlement `allowed` (bool), `reason` (string) and
+			 *                           `message` (string, shown to the vendor
+			 *                           when the switch-off is refused).
+			 * @param int   $user_id     The user being evaluated.
+			 */
+			$entitlement = (array) apply_filters( 'holiday_mode_for_hivepress_entitlement', $entitlement, $user_id );
+
+			$entitlement['allowed'] = ! empty( $entitlement['allowed'] );
+			$entitlement['reason']  = isset( $entitlement['reason'] ) ? (string) $entitlement['reason'] : '';
+
+			if ( ! $entitlement['allowed'] && empty( $entitlement['message'] ) ) {
+				$entitlement['message'] = esc_html__( 'Holiday mode cannot be switched off yet, so your listings stay hidden. Please contact the site owner to restore them.', 'holiday-mode-for-hivepress' );
+			}
+
+			return $entitlement;
+		}
+
+		/**
+		 * HivePress Memberships verdict for a vendor.
+		 *
+		 * Governs only when listing restrictions are switched on for the site
+		 * (`hp_membership_models`, read at
+		 * `memberships/includes/components/class-membership.php:46`) and the
+		 * vendor holds a membership record. A membership post is `publish`
+		 * while active and `draft` once expired (`models/class-membership.php:31-45`).
+		 *
+		 * @param int $user_id The user being evaluated.
+		 * @return bool|null True if entitled, false if lapsed, null if not governed.
+		 */
+		private function check_memberships( $user_id ) {
+			if ( ! function_exists( 'hivepress' ) || ! hivepress()->get_version( 'memberships' ) || ! class_exists( '\HivePress\Models\Membership' ) ) {
+				return null;
+			}
+
+			if ( ! in_array( 'listing', (array) get_option( 'hp_membership_models', [ 'listing' ] ), true ) ) {
+				return null;
+			}
+
+			try {
+				$active = \HivePress\Models\Membership::query()->filter(
+					[
+						'status' => 'publish',
+						'user'   => $user_id,
+					]
+				)->get_first_id();
+
+				if ( $active ) {
+					return true;
+				}
+
+				// Only a vendor who has actually held a membership is governed
+				// by one; anyone else got their listings another way.
+				$lapsed = \HivePress\Models\Membership::query()->filter(
+					[
+						'status__in' => [ 'draft', 'pending' ],
+						'user'       => $user_id,
+					]
+				)->get_first_id();
+
+				return $lapsed ? false : null;
+			} catch ( \Throwable $e ) {
+				return null;
+			}
+		}
+
+		/**
+		 * WooCommerce Subscriptions verdict for a vendor.
+		 *
+		 * Governs only a vendor who holds a subscription of some kind, so a site
+		 * that uses subscriptions for something unrelated (or has none yet)
+		 * never traps its vendors.
+		 *
+		 * @param int $user_id The user being evaluated.
+		 * @return bool|null True if entitled, false if lapsed, null if not governed.
+		 */
+		private function check_subscriptions( $user_id ) {
 			if ( ! function_exists( 'wcs_user_has_subscription' ) ) {
-				return true;
+				return null;
 			}
 
 			if ( wcs_user_has_subscription( $user_id, 0, 'active' ) ) {
 				return true;
 			}
 
-			return (bool) $has_access;
+			return wcs_user_has_subscription( $user_id, 0, 'any' ) ? false : null;
 		}
 
 		/* ---------------- Banner ---------------- */
