@@ -3,7 +3,7 @@
  * Plugin Name:       Holiday Mode for HivePress
  * Plugin URI:        https://community.hivepress.io/u/chrisb/summary
  * Description:       Vendor-only Holiday Mode toggle that hides (drafts) and restores all of a vendor's listings, with an on-site banner while active and an away notice on the vendor's public profile. Restoring is entitlement-aware: it respects each listing's own expiry date, and any HivePress Membership or WooCommerce Subscription the vendor actually holds.
- * Version:           1.5.0
+ * Version:           1.6.1
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Requires Plugins:  hivepress
@@ -26,6 +26,11 @@ if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_REPO' ) ) {
 	define( 'HOLIDAY_MODE_FOR_HIVEPRESS_REPO', 'irapidchris-del/holiday-mode-for-hivepress' );
 }
 
+// Keep in step with the Version header above on every release.
+if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION' ) ) {
+	define( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION', '1.6.1' );
+}
+
 require_once __DIR__ . '/includes/class-holiday-mode-for-hivepress-updater.php';
 
 if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
@@ -35,6 +40,22 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 	 * settings form that hides and restores all of the vendor's listings.
 	 */
 	final class Holiday_Mode_For_HivePress {
+
+		/**
+		 * Settings tab slug, also used by the Plugins-screen quick link.
+		 */
+		const SETTINGS_TAB = 'holiday_mode';
+
+		/**
+		 * Option storing whether deleting the plugin should wipe its data.
+		 * HivePress prefixes stored options with `hp_`.
+		 */
+		const DELETE_DATA_OPTION = 'hp_holiday_mode_for_hivepress_delete_data';
+
+		/**
+		 * Option recording the last version whose upgrade routines have run.
+		 */
+		const VERSION_OPTION = 'hp_holiday_mode_for_hivepress_version';
 
 		/**
 		 * User meta flag storing whether holiday mode is on.
@@ -131,12 +152,130 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			// context exists.
 			add_filter( 'hivepress/v1/templates/vendor_view_page/blocks', [ $this, 'add_vendor_notice_block' ], 100, 2 );
 
+			// Settings tab, holding the delete-on-uninstall control.
+			add_filter( 'hivepress/v1/settings', [ $this, 'add_settings' ] );
+
 			if ( is_admin() ) {
+
+				// One-time upgrade routines, run on the first admin visit
+				// after an update.
+				add_action( 'admin_init', [ $this, 'maybe_upgrade' ] );
 
 				// Show admins why a vendor's listings are drafts.
 				add_filter( 'manage_hp_listing_posts_columns', [ $this, 'add_listing_admin_columns' ] );
 				add_action( 'manage_hp_listing_posts_custom_column', [ $this, 'render_listing_admin_columns' ], 10, 2 );
 			}
+		}
+
+		/* ---------------- Upgrades ---------------- */
+
+		/**
+		 * Runs one-time upgrade routines after the plugin is updated.
+		 *
+		 * @return void
+		 */
+		public function maybe_upgrade() {
+			$stored = (string) get_option( self::VERSION_OPTION );
+
+			if ( HOLIDAY_MODE_FOR_HIVEPRESS_VERSION === $stored ) {
+				return;
+			}
+
+			// Run on every version change rather than gating on the version
+			// that introduced the sweep: it costs one indexed query when there
+			// is nothing to do, and re-running it on each upgrade means a site
+			// that was rolled back to a pre-1.3.2 build (which recreates the
+			// debris) heals itself on its next update instead of never.
+			$this->cleanup_stale_flags();
+
+			update_option( self::VERSION_OPTION, HOLIDAY_MODE_FOR_HIVEPRESS_VERSION, false );
+		}
+
+		/**
+		 * Removes the empty holiday-flag rows left behind by 1.3.1 and older.
+		 *
+		 * Those versions stored an empty string when holiday mode was switched
+		 * off instead of deleting the row, so long-standing sites carry one
+		 * inert row per vendor who ever used the feature. Only rows whose value
+		 * is exactly '' are removed: an active flag holds '1' and must survive.
+		 * This cannot go through delete_metadata(), which treats an empty
+		 * meta value as "match any value" and would wipe active flags too.
+		 *
+		 * @return void
+		 */
+		private function cleanup_stale_flags() {
+			global $wpdb;
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- one-off upgrade sweep: the meta API cannot target rows by stored value, and caching a single-run query is pointless.
+			$user_ids = $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT user_id FROM {$wpdb->usermeta} WHERE meta_key = %s AND meta_value = %s",
+					self::USER_META_KEY,
+					''
+				)
+			);
+
+			if ( empty( $user_ids ) ) {
+				return;
+			}
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- value-matched delete: delete_metadata() treats an empty value as "match any" and would wipe active flags; caches are invalidated per user below.
+			$wpdb->query(
+				$wpdb->prepare(
+					"DELETE FROM {$wpdb->usermeta} WHERE meta_key = %s AND meta_value = %s",
+					self::USER_META_KEY,
+					''
+				)
+			);
+
+			// A direct delete bypasses WordPress's meta cache, which matters on
+			// hosts with a persistent object cache: without this, the deleted
+			// rows would appear to survive until the cache expired.
+			foreach ( array_unique( array_map( 'intval', $user_ids ) ) as $user_id ) {
+				wp_cache_delete( $user_id, 'user_meta' );
+			}
+		}
+
+		/* ---------------- Settings ---------------- */
+
+		/**
+		 * Adds the plugin's settings tab.
+		 *
+		 * The only setting is the delete-on-uninstall control, because a site
+		 * owner cannot be asked at delete time: the confirmation form in
+		 * `wp-admin/plugins.php` is hard-coded with no hook inside it, and
+		 * WordPress prints its own "will also delete its data" warning whenever
+		 * an uninstall.php exists at all, whatever that file really does. The
+		 * section description has to correct that warning.
+		 *
+		 * @param array $settings Settings configuration.
+		 * @return array
+		 */
+		public function add_settings( $settings ) {
+			$settings[ self::SETTINGS_TAB ] = [
+				'title'    => esc_html__( 'Holiday Mode', 'holiday-mode-for-hivepress' ),
+				'_order'   => 100,
+
+				'sections' => [
+					'holiday_mode_for_hivepress_removal' => [
+						'title'       => esc_html__( 'Removing the Plugin', 'holiday-mode-for-hivepress' ),
+						'description' => esc_html__( 'Your settings are kept if you delete this plugin, so you can reinstall it and carry on. WordPress shows its own warning on the delete screen saying the data goes too, but that warning is the same for every plugin and does not apply here unless you tick the box below. Switching the plugin off never removes anything, and deleting it always brings hidden listings back first.', 'holiday-mode-for-hivepress' ),
+						'_order'      => 10,
+
+						'fields'      => [
+							'holiday_mode_for_hivepress_delete_data' => [
+								'label'       => esc_html__( 'Delete All Data', 'holiday-mode-for-hivepress' ),
+								'caption'     => esc_html__( 'Delete this plugin\'s settings when the plugin is deleted', 'holiday-mode-for-hivepress' ),
+								'description' => esc_html__( 'Leave this unticked unless you are certain. With it ticked, deleting the plugin also removes every setting on this page. It cannot be undone and there is no confirmation step. Either way, deleting the plugin restores every hidden listing to the status it had and switches holiday mode off for everyone, because listings must never be left hidden with no way to bring them back.', 'holiday-mode-for-hivepress' ),
+								'type'        => 'checkbox',
+								'_order'      => 10,
+							],
+						],
+					],
+				],
+			];
+
+			return $settings;
 		}
 
 		/* ---------------- UI: field ---------------- */
@@ -303,7 +442,14 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			}
 
 			if ( $enable ) {
-				update_user_meta( $user_id, self::USER_META_KEY, true );
+				// Draft nothing unless the flag is genuinely stored: if this
+				// write is ever lost (it can race the one-time debris cleanup
+				// on a legacy row), hiding the listings anyway would leave
+				// them invisible while every indicator reads "off".
+				if ( ! update_user_meta( $user_id, self::USER_META_KEY, true ) ) {
+					return;
+				}
+
 				$this->bulk_set_draft( $user_id );
 			} else {
 				// Delete the flag rather than storing an empty value, so
@@ -1035,7 +1181,7 @@ if ( ! function_exists( 'holiday_mode_for_hivepress_missing_hivepress_notice' ) 
 		if ( ! current_user_can( 'activate_plugins' ) ) {
 			return;
 		}
-		echo '<div class="notice notice-warning"><p>';
+		echo '<div class="notice notice-warning is-dismissible"><p>';
 		echo esc_html__( 'Holiday Mode for HivePress requires HivePress to be installed and active.', 'holiday-mode-for-hivepress' );
 		echo '</p></div>';
 	}

@@ -79,6 +79,7 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress_Updater' ) ) :
 
 			add_filter( 'update_plugins_github.com', [ $this, 'check_for_update' ], 10, 3 );
 			add_filter( 'plugins_api', [ $this, 'get_plugin_information' ], 10, 3 );
+			add_filter( 'plugin_action_links_' . $this->basename, [ $this, 'add_settings_link' ] );
 			add_filter( 'plugin_action_links_' . $this->basename, [ $this, 'add_update_check_link' ] );
 			add_filter( 'network_admin_plugin_action_links_' . $this->basename, [ $this, 'add_update_check_link' ] );
 			add_filter( 'upgrader_source_selection', [ $this, 'fix_update_directory' ], 10, 4 );
@@ -136,11 +137,19 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress_Updater' ) ) :
 		 * @return array<string, string>
 		 */
 		private function fetch_latest_release() {
+			// Set the user agent explicitly. Left out, WordPress fills in
+			// "WordPress/{version}; {site url}" (wp-includes/class-wp-http.php:211),
+			// which would tell GitHub the site's address and its exact
+			// WordPress version on every check. GitHub only requires the header
+			// to identify something, so the plugin name and version satisfy it
+			// while sending nothing about the site.
 			$response = wp_remote_get(
 				'https://api.github.com/repos/' . $this->repo . '/releases/latest',
 				[
-					'timeout' => 10,
-					'headers' => [ 'Accept' => 'application/vnd.github+json' ],
+					'timeout'    => 10,
+					'user-agent' => 'holiday-mode-for-hivepress/' . $this->get_version(),
+
+					'headers'    => [ 'Accept' => 'application/vnd.github+json' ],
 				]
 			);
 
@@ -276,6 +285,26 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress_Updater' ) ) :
 		}
 
 		/* ---------------- Manual check ---------------- */
+
+		/**
+		 * Adds the settings link to the plugin row.
+		 *
+		 * Prepended rather than appended, so it sits where WordPress users
+		 * expect to find it.
+		 *
+		 * @param array<string> $links Plugin action links.
+		 * @return array<string>
+		 */
+		public function add_settings_link( $links ) {
+			if ( current_user_can( 'manage_options' ) && function_exists( 'hivepress' ) ) {
+				array_unshift(
+					$links,
+					'<a href="' . esc_url( admin_url( 'admin.php?page=hp_settings&tab=holiday_mode' ) ) . '">' . esc_html__( 'Settings', 'holiday-mode-for-hivepress' ) . '</a>'
+				);
+			}
+
+			return $links;
+		}
 
 		/**
 		 * Adds the manual update check link to the plugin row.
