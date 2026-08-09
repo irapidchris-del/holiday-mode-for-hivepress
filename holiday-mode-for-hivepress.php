@@ -3,7 +3,7 @@
  * Plugin Name:       Holiday Mode for HivePress
  * Plugin URI:        https://community.hivepress.io/u/chrisb/summary
  * Description:       Vendor-only Holiday Mode toggle that hides (drafts) and restores all of a vendor's listings, with an on-site banner while active and an away notice on the vendor's public profile. Restoring is entitlement-aware: it respects each listing's own expiry date, and any HivePress Membership or WooCommerce Subscription the vendor actually holds.
- * Version:           1.6.1
+ * Version:           1.7.0
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Requires Plugins:  hivepress
@@ -28,7 +28,7 @@ if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_REPO' ) ) {
 
 // Keep in step with the Version header above on every release.
 if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION' ) ) {
-	define( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION', '1.6.1' );
+	define( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION', '1.7.0' );
 }
 
 require_once __DIR__ . '/includes/class-holiday-mode-for-hivepress-updater.php';
@@ -63,6 +63,18 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		const USER_META_KEY = '_holiday_mode_for_hivepress';
 
 		/**
+		 * User meta storing a vendor's own away-message headline and text,
+		 * used only while the site owner has vendor messages switched on.
+		 */
+		const USER_META_HEADLINE = '_holiday_mode_for_hivepress_headline';
+		const USER_META_MESSAGE  = '_holiday_mode_for_hivepress_message';
+
+		/**
+		 * Option gating the vendor-written away message feature.
+		 */
+		const VENDOR_CUSTOM_OPTION = 'hp_holiday_mode_for_hivepress_vendor_custom';
+
+		/**
 		 * Listing post meta storing the status a listing had before it was hidden.
 		 */
 		const LISTING_META_PREV = '_holiday_mode_for_hivepress_prev_status';
@@ -73,10 +85,32 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		const FIELD = 'holiday_mode_for_hivepress';
 
 		/**
+		 * Form field names for the vendor's own away message, plus the hidden
+		 * marker proving the two text inputs were really in the submitting
+		 * page (see extend_settings_form for the trap it closes).
+		 */
+		const FIELD_HEADLINE       = 'holiday_mode_for_hivepress_headline';
+		const FIELD_MESSAGE        = 'holiday_mode_for_hivepress_message';
+		const FIELD_CUSTOM_PRESENT = 'holiday_mode_for_hivepress_custom_present';
+
+		/**
 		 * Statuses that represent a visible/scheduled listing we should hide.
 		 * Anything else (draft, trash, auto-draft, inherit) is left untouched.
 		 */
 		const HIDEABLE = [ 'publish', 'pending', 'private', 'future' ];
+
+		/**
+		 * Default colour for the notice text, labels and icons, and the
+		 * fixed background/border of the info box design.
+		 */
+		const COLOR_DEFAULT = '#31708f';
+		const COLOR_BG      = '#d9edf7';
+		const COLOR_BORDER  = '#bce8f1';
+
+		/**
+		 * Default Font Awesome icon (bare name, as core's icon picker stores).
+		 */
+		const ICON_DEFAULT = 'info-circle';
 
 		/**
 		 * Singleton instance.
@@ -93,6 +127,15 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		 * @var array|null
 		 */
 		private $pending_toggle = null;
+
+		/**
+		 * Vendor away-message text captured during form validation, applied
+		 * once the user model actually saves. Same pattern as the toggle, and
+		 * for the same reason: unrelated profile updates must never touch it.
+		 *
+		 * @var array|null
+		 */
+		private $pending_custom = null;
 
 		/**
 		 * Guards against re-entering the listing enforcement hook from our own
@@ -160,6 +203,9 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				// One-time upgrade routines, run on the first admin visit
 				// after an update.
 				add_action( 'admin_init', [ $this, 'maybe_upgrade' ] );
+
+				// Colour picker for the notice colour settings.
+				add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_settings_assets' ] );
 
 				// Show admins why a vendor's listings are drafts.
 				add_filter( 'manage_hp_listing_posts_columns', [ $this, 'add_listing_admin_columns' ] );
@@ -241,26 +287,200 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		/**
 		 * Adds the plugin's settings tab.
 		 *
-		 * The only setting is the delete-on-uninstall control, because a site
-		 * owner cannot be asked at delete time: the confirmation form in
+		 * Two customisation sections (one per notice) and the
+		 * delete-on-uninstall control. The removal section exists because a
+		 * site owner cannot be asked at delete time: the confirmation form in
 		 * `wp-admin/plugins.php` is hard-coded with no hook inside it, and
 		 * WordPress prints its own "will also delete its data" warning whenever
 		 * an uninstall.php exists at all, whatever that file really does. The
 		 * section description has to correct that warning.
 		 *
+		 * Text fields are deliberately NOT given a `default`: HivePress writes
+		 * config defaults into the database, and a stored translated string
+		 * would then shadow every translation. Blank means "use the built-in
+		 * wording", which stays translator-reachable; the placeholder shows
+		 * what that wording is. Colours likewise stay blank so the built-in
+		 * palette can evolve without walking back stored values.
+		 *
 		 * @param array $settings Settings configuration.
 		 * @return array
 		 */
 		public function add_settings( $settings ) {
+			// Core has a Color field (with hex validation) since 1.7.26; fall
+			// back to a plain text field on older cores.
+			$color_type = class_exists( '\HivePress\Fields\Color' ) ? 'color' : 'text';
+
+			$color_description = esc_html__( 'Pick a colour or paste a 6-digit hex code such as #31708f. Leave blank to use the standard blue.', 'holiday-mode-for-hivepress' );
+
+			$icon_color_description = esc_html__( 'Pick a colour or paste a 6-digit hex code such as #31708f. Leave blank to match the label colour.', 'holiday-mode-for-hivepress' );
+
+			// A non-empty 'html' list makes HivePress sanitise through
+			// wp_kses() instead of sanitize_text_field(), which silently
+			// strips every %-plus-two-hex-digits pair ("%20 off" saves as
+			// "off"). Output is escaped everywhere, so the allowed tags
+			// render as typed text at worst.
+			$prose_html = [
+				'em'     => [],
+				'strong' => [],
+			];
+
+			// The icon-colour swatches must show the colour actually in
+			// effect when the field is blank, which is the (possibly
+			// customised) label colour, not always the standard blue.
+			$banner_icon_default = $this->get_color_option( 'banner_label_color', self::COLOR_DEFAULT );
+			$notice_icon_default = $this->get_color_option( 'notice_label_color', self::COLOR_DEFAULT );
+
 			$settings[ self::SETTINGS_TAB ] = [
 				'title'    => esc_html__( 'Holiday Mode', 'holiday-mode-for-hivepress' ),
 				'_order'   => 100,
 
 				'sections' => [
+					'holiday_mode_for_hivepress_banner'  => [
+						'title'       => esc_html__( 'Vendor Banner', 'holiday-mode-for-hivepress' ),
+						'description' => esc_html__( 'This banner appears at the top of the account pages, but only for a vendor whose own holiday mode is switched on. It reminds them that their listings are currently hidden. Leave any field blank to use the standard design.', 'holiday-mode-for-hivepress' ),
+						'_order'      => 10,
+
+						'fields'      => [
+							'holiday_mode_for_hivepress_banner_label' => [
+								'label'       => esc_html__( 'Banner Label', 'holiday-mode-for-hivepress' ),
+								'description' => esc_html__( 'The short bold text at the start of the banner. Leave blank to use the standard wording.', 'holiday-mode-for-hivepress' ),
+								'placeholder' => __( 'Holiday mode is active.', 'holiday-mode-for-hivepress' ),
+								'type'        => 'text',
+								'max_length'  => 100,
+								'html'        => $prose_html,
+								'_order'      => 10,
+							],
+
+							'holiday_mode_for_hivepress_banner_message' => [
+								'label'       => esc_html__( 'Banner Message', 'holiday-mode-for-hivepress' ),
+								/* translators: %s is typed literally by the site owner; it marks where the account settings link goes in the banner. */
+								'description' => esc_html__( 'The sentence after the label. Type %s where the link to the account settings page should appear. Leave blank to use the standard wording.', 'holiday-mode-for-hivepress' ),
+								/* translators: %s is the linked "Account → Settings" text. */
+								'placeholder' => __( 'Your listings are hidden from visitors until you switch it off in %s.', 'holiday-mode-for-hivepress' ),
+								'type'        => 'textarea',
+								'max_length'  => 500,
+								'html'        => $prose_html,
+								'_order'      => 20,
+							],
+
+							'holiday_mode_for_hivepress_banner_icon' => [
+								'label'       => esc_html__( 'Banner Icon', 'holiday-mode-for-hivepress' ),
+								'description' => esc_html__( 'The icon shown at the start of the banner. Leave empty to use the information icon.', 'holiday-mode-for-hivepress' ),
+								'type'        => 'select',
+								'options'     => 'icons',
+								'_order'      => 30,
+							],
+
+							'holiday_mode_for_hivepress_banner_icon_color' => [
+								'label'       => esc_html__( 'Banner Icon Colour', 'holiday-mode-for-hivepress' ),
+								'description' => $icon_color_description,
+								'type'        => $color_type,
+								'attributes'  => [
+									'data-default-color' => $banner_icon_default,
+								],
+								'_order'      => 35,
+							],
+
+							'holiday_mode_for_hivepress_banner_label_color' => [
+								'label'       => esc_html__( 'Banner Label Colour', 'holiday-mode-for-hivepress' ),
+								'description' => $color_description,
+								'type'        => $color_type,
+								'attributes'  => [
+									'data-default-color' => self::COLOR_DEFAULT,
+								],
+								'_order'      => 40,
+							],
+
+							'holiday_mode_for_hivepress_banner_text_color' => [
+								'label'       => esc_html__( 'Banner Text Colour', 'holiday-mode-for-hivepress' ),
+								'description' => $color_description,
+								'type'        => $color_type,
+								'attributes'  => [
+									'data-default-color' => self::COLOR_DEFAULT,
+								],
+								'_order'      => 50,
+							],
+						],
+					],
+
+					'holiday_mode_for_hivepress_notice'  => [
+						'title'       => esc_html__( 'Profile Notice', 'holiday-mode-for-hivepress' ),
+						'description' => esc_html__( 'This notice appears on a vendor\'s public profile while their holiday mode is switched on. It replaces the listings heading and the listings area, so visitors know the vendor is away rather than gone.', 'holiday-mode-for-hivepress' ),
+						'_order'      => 20,
+
+						'fields'      => [
+							'holiday_mode_for_hivepress_vendor_custom' => [
+								'label'       => esc_html__( 'Vendor Messages', 'holiday-mode-for-hivepress' ),
+								'caption'     => esc_html__( 'Let each vendor write their own away message', 'holiday-mode-for-hivepress' ),
+								'description' => esc_html__( 'With this ticked, two extra fields appear under the Holiday mode switch in each vendor\'s account settings: a headline and a short explanation. A vendor\'s own words then replace the label and message below on their profile, keeping the same icon and colours. Vendors who leave them blank get the notice configured here.', 'holiday-mode-for-hivepress' ),
+								'type'        => 'checkbox',
+								'_order'      => 5,
+							],
+
+							'holiday_mode_for_hivepress_notice_label' => [
+								'label'       => esc_html__( 'Notice Label', 'holiday-mode-for-hivepress' ),
+								'description' => esc_html__( 'The short bold heading of the notice. Leave blank to use the standard wording.', 'holiday-mode-for-hivepress' ),
+								'placeholder' => __( 'On holiday', 'holiday-mode-for-hivepress' ),
+								'type'        => 'text',
+								'max_length'  => 100,
+								'html'        => $prose_html,
+								'_order'      => 10,
+							],
+
+							'holiday_mode_for_hivepress_notice_message' => [
+								'label'       => esc_html__( 'Notice Message', 'holiday-mode-for-hivepress' ),
+								'description' => esc_html__( 'The text under the heading. Leave blank to use the standard wording, which mentions messaging only when the Messages extension is active.', 'holiday-mode-for-hivepress' ),
+								'placeholder' => __( 'This user is on holiday at the moment. You can still send them a message, but they may take longer than usual to reply.', 'holiday-mode-for-hivepress' ),
+								'type'        => 'textarea',
+								'max_length'  => 500,
+								'html'        => $prose_html,
+								'_order'      => 20,
+							],
+
+							'holiday_mode_for_hivepress_notice_icon' => [
+								'label'       => esc_html__( 'Notice Icon', 'holiday-mode-for-hivepress' ),
+								'description' => esc_html__( 'The icon shown at the start of the notice. Leave empty to use the information icon.', 'holiday-mode-for-hivepress' ),
+								'type'        => 'select',
+								'options'     => 'icons',
+								'_order'      => 30,
+							],
+
+							'holiday_mode_for_hivepress_notice_icon_color' => [
+								'label'       => esc_html__( 'Notice Icon Colour', 'holiday-mode-for-hivepress' ),
+								'description' => $icon_color_description,
+								'type'        => $color_type,
+								'attributes'  => [
+									'data-default-color' => $notice_icon_default,
+								],
+								'_order'      => 35,
+							],
+
+							'holiday_mode_for_hivepress_notice_label_color' => [
+								'label'       => esc_html__( 'Notice Label Colour', 'holiday-mode-for-hivepress' ),
+								'description' => $color_description,
+								'type'        => $color_type,
+								'attributes'  => [
+									'data-default-color' => self::COLOR_DEFAULT,
+								],
+								'_order'      => 40,
+							],
+
+							'holiday_mode_for_hivepress_notice_text_color' => [
+								'label'       => esc_html__( 'Notice Text Colour', 'holiday-mode-for-hivepress' ),
+								'description' => $color_description,
+								'type'        => $color_type,
+								'attributes'  => [
+									'data-default-color' => self::COLOR_DEFAULT,
+								],
+								'_order'      => 50,
+							],
+						],
+					],
+
 					'holiday_mode_for_hivepress_removal' => [
 						'title'       => esc_html__( 'Removing the Plugin', 'holiday-mode-for-hivepress' ),
 						'description' => esc_html__( 'Your settings are kept if you delete this plugin, so you can reinstall it and carry on. WordPress shows its own warning on the delete screen saying the data goes too, but that warning is the same for every plugin and does not apply here unless you tick the box below. Switching the plugin off never removes anything, and deleting it always brings hidden listings back first.', 'holiday-mode-for-hivepress' ),
-						'_order'      => 10,
+						'_order'      => 100,
 
 						'fields'      => [
 							'holiday_mode_for_hivepress_delete_data' => [
@@ -276,6 +496,169 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			];
 
 			return $settings;
+		}
+
+		/**
+		 * Loads the WordPress colour picker on the plugin's settings tab and
+		 * attaches it to the four colour fields.
+		 *
+		 * Core's Color field is a bare input with no picker of its own, so the
+		 * picker is ours to add. The inline script guards two traps: Iris seeds
+		 * an empty input with #000000 (which would silently save black for
+		 * every colour left blank), so anything untouched is blanked again on
+		 * init and on submit; and the field's server-side pattern rejects
+		 * 3-digit shorthand, so #abc is expanded to #aabbcc before submission.
+		 *
+		 * @return void
+		 */
+		public function enqueue_settings_assets() {
+			// Screen detection only, no form data is read or written.
+			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only check of which admin page is rendering.
+			$page = isset( $_GET['page'] ) ? sanitize_key( wp_unslash( $_GET['page'] ) ) : '';
+			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only check of which admin page is rendering.
+			$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : '';
+
+			if ( 'hp_settings' !== $page || self::SETTINGS_TAB !== $tab ) {
+				return;
+			}
+
+			wp_enqueue_style( 'wp-color-picker' );
+			wp_enqueue_script( 'wp-color-picker' );
+
+			// The submit guard compares values instead of listening for events:
+			// Iris writes palette picks into the input with jQuery .val(),
+			// which fires no DOM event (only the widget-level "irischange"),
+			// so an event-based "was it touched" flag misses the picker's
+			// primary interaction and would wipe a palette-picked colour on
+			// save. Comparing against the seeded default is deterministic,
+			// and storing '' for a value equal to the shown default is
+			// semantically identical anyway: blank renders that same colour.
+			$js = 'jQuery(function($){' .
+				'$(\'input[name^="hp_holiday_mode_for_hivepress_"][name$="_color"]\').each(function(){' .
+					'var input=this,$input=$(input);' .
+					'var initial=input.getAttribute("value")||"";' .
+					'var def=(input.getAttribute("data-default-color")||"").toLowerCase();' .
+					'$input.attr("type","text");' .
+					'function expand(){var m=/^#([0-9a-fA-F]{3})$/.exec($input.val());if(m){$input.val("#"+m[1].replace(/([0-9a-fA-F])/g,"$1$1"));}}' .
+					'$input.wpColorPicker();' .
+					// An empty input must not read as "black is chosen": show the
+					// colour actually in effect (the default) in the swatch, and
+					// let the submit guard keep the stored value empty unless the
+					// admin picks something different.
+					'if(""===initial){if(def){$input.wpColorPicker("color",def);}else{$input.val("");}}' .
+					'$input.on("change blur",expand);' .
+					'$input.on("keydown",function(e){if("Enter"===e.key){expand();}});' .
+					'$input.closest("form").on("submit",function(){expand();if(""===initial&&$input.val().toLowerCase()===def){$input.val("");}});' .
+				'});' .
+			'});';
+
+			wp_add_inline_script( 'wp-color-picker', $js );
+		}
+
+		/* ---------------- Notice customisation ---------------- */
+
+		/**
+		 * Returns the resolved label, message, icon and colours for one of the
+		 * two notices, applying any admin customisation from the settings tab.
+		 *
+		 * Absent options and stored empty strings both fall back to the
+		 * built-in value: every field on the settings tab says "leave blank to
+		 * use the standard ...", so a blank must behave as the default rather
+		 * than as a deliberate empty.
+		 *
+		 * @param string $context Either 'banner' (vendor-facing, account pages)
+		 *                        or 'notice' (public profile).
+		 * @return array `label`, `message`, `icon` (bare Font Awesome name),
+		 *               `label_color`, `text_color` and `icon_color` (6-digit hex).
+		 */
+		public function get_notice_args( $context ) {
+			$context = 'banner' === $context ? 'banner' : 'notice';
+
+			if ( 'banner' === $context ) {
+				$label = __( 'Holiday mode is active.', 'holiday-mode-for-hivepress' );
+
+				/* translators: %s is the linked "Account → Settings" text. */
+				$message = __( 'Your listings are hidden from visitors until you switch it off in %s.', 'holiday-mode-for-hivepress' );
+			} else {
+				$label   = __( 'On holiday', 'holiday-mode-for-hivepress' );
+				$message = __( 'This user is on holiday at the moment, so their listings are hidden until they return.', 'holiday-mode-for-hivepress' );
+
+				// Promise messaging only where the Messages extension provides
+				// it; on any other site the sentence would point at a button
+				// that does not exist.
+				if ( function_exists( 'hivepress' ) && hivepress()->get_version( 'messages' ) ) {
+					$message = __( 'This user is on holiday at the moment. You can still send them a message, but they may take longer than usual to reply.', 'holiday-mode-for-hivepress' );
+				}
+			}
+
+			$label_color = $this->get_color_option( $context . '_label_color', self::COLOR_DEFAULT );
+
+			return [
+				'label'       => $this->get_text_option( $context . '_label', $label ),
+				'message'     => $this->get_text_option( $context . '_message', $message ),
+				'icon'        => $this->get_icon_option( $context . '_icon' ),
+				'label_color' => $label_color,
+				'text_color'  => $this->get_color_option( $context . '_text_color', self::COLOR_DEFAULT ),
+
+				// A blank icon colour follows the label colour, custom or not,
+				// so the icon and label stay a matched pair by default.
+				'icon_color'  => $this->get_color_option( $context . '_icon_color', $label_color ),
+			];
+		}
+
+		/**
+		 * Reads a text setting, falling back to the built-in wording when the
+		 * option is absent or blank.
+		 *
+		 * @param string $key      Option key without the plugin prefix.
+		 * @param string $fallback Built-in wording.
+		 * @return string
+		 */
+		private function get_text_option( $key, $fallback ) {
+			$value = get_option( 'hp_holiday_mode_for_hivepress_' . $key );
+
+			if ( ! is_string( $value ) || '' === trim( $value ) ) {
+				return $fallback;
+			}
+
+			return $value;
+		}
+
+		/**
+		 * Reads a colour setting. The value lands inside a style attribute, so
+		 * it is validated here as well as at save time; anything unexpected
+		 * falls back to the given colour.
+		 *
+		 * @param string $key      Option key without the plugin prefix.
+		 * @param string $fallback Colour to use when unset or invalid.
+		 * @return string
+		 */
+		private function get_color_option( $key, $fallback ) {
+			$value = get_option( 'hp_holiday_mode_for_hivepress_' . $key );
+
+			if ( is_string( $value ) && preg_match( '/^#[0-9a-fA-F]{6}$/', $value ) ) {
+				return $value;
+			}
+
+			return $fallback;
+		}
+
+		/**
+		 * Reads an icon setting. Core's icon picker stores the bare Font
+		 * Awesome name; the value lands inside a class attribute, so only a
+		 * plain icon-name shape is accepted.
+		 *
+		 * @param string $key Option key without the plugin prefix.
+		 * @return string
+		 */
+		private function get_icon_option( $key ) {
+			$value = get_option( 'hp_holiday_mode_for_hivepress_' . $key );
+
+			if ( is_string( $value ) && preg_match( '/^[a-z0-9-]+$/', $value ) ) {
+				return $value;
+			}
+
+			return self::ICON_DEFAULT;
 		}
 
 		/* ---------------- UI: field ---------------- */
@@ -338,6 +721,65 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				'_order'      => 330,
 			];
 
+			// The vendor's own away message, where the site owner allows it.
+			// Gated on the option in PHP, not just hidden: an admin switching
+			// the feature off must silence stored vendor text everywhere, and
+			// the fields must stop being read the moment the box is unticked.
+			if ( get_option( self::VENDOR_CUSTOM_OPTION ) ) {
+				$notice_defaults = $this->get_notice_args( 'notice' );
+
+				// The 'html' list routes sanitisation through wp_kses() instead
+				// of sanitize_text_field(), which silently strips every
+				// %-plus-two-hex-digits pair from prose (a pasted URL with
+				// %20 loses characters). Output is escaped, so the allowed
+				// tags render as typed text at worst.
+				$vendor_html = [
+					'em'     => [],
+					'strong' => [],
+				];
+
+				$form['fields'][ self::FIELD_HEADLINE ] = [
+					'label'       => __( 'Away message headline', 'holiday-mode-for-hivepress' ),
+					'description' => __( 'Shown on your public profile while holiday mode is on. Leave blank to use the site\'s standard message.', 'holiday-mode-for-hivepress' ),
+					'placeholder' => $notice_defaults['label'],
+					'type'        => 'text',
+					'max_length'  => 100,
+					'html'        => $vendor_html,
+					'default'     => (string) get_user_meta( $user_id, self::USER_META_HEADLINE, true ),
+					'_separate'   => true,
+					'_order'      => 331,
+				];
+
+				$form['fields'][ self::FIELD_MESSAGE ] = [
+					'label'       => __( 'Away message text', 'holiday-mode-for-hivepress' ),
+					'description' => __( 'The sentence or two under the headline. Leave blank to use the site\'s standard message.', 'holiday-mode-for-hivepress' ),
+					'placeholder' => $notice_defaults['message'],
+					'type'        => 'textarea',
+					'max_length'  => 500,
+					'html'        => $vendor_html,
+					'default'     => (string) get_user_meta( $user_id, self::USER_META_MESSAGE, true ),
+					'_separate'   => true,
+					'_order'      => 332,
+				];
+
+				// Marker proving the two text inputs above were really in the
+				// submitting page. Form::set_values() writes null onto every
+				// server-side field whose param is absent from the request
+				// (`forms/class-form.php:307-321`), so a save posted from a
+				// page rendered while this feature was OFF, or any partial
+				// POST, would otherwise read as "both fields cleared" and
+				// silently delete the vendor's stored message. A stale page
+				// cannot echo the marker back, so its absence means "the
+				// fields were not shown" rather than "the vendor cleared
+				// them".
+				$form['fields'][ self::FIELD_CUSTOM_PRESENT ] = [
+					'type'      => 'hidden',
+					'default'   => '1',
+					'_separate' => true,
+					'_order'    => 333,
+				];
+			}
+
 			return $form;
 		}
 
@@ -386,6 +828,22 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				return $errors;
 			}
 
+			// Capture the vendor's own away message BEFORE the unchanged-toggle
+			// early return below: the text must save on every settings-form
+			// submission, not only when the toggle flips. Read only while the
+			// site owner has the feature switched on, and only when the
+			// hidden marker proves the text inputs were in the submitting
+			// page: a null marker means the page was rendered without them
+			// (feature toggled on since, or a partial POST), where a null
+			// text value must not be mistaken for a deliberate clearing.
+			if ( get_option( self::VENDOR_CUSTOM_OPTION ) && isset( $fields[ self::FIELD_HEADLINE ] ) && null !== $form->get_value( self::FIELD_CUSTOM_PRESENT ) ) {
+				$this->pending_custom = [
+					'user_id'  => (int) $user_id,
+					'headline' => trim( (string) $form->get_value( self::FIELD_HEADLINE ) ),
+					'message'  => trim( (string) $form->get_value( self::FIELD_MESSAGE ) ),
+				];
+			}
+
 			$submitted = (bool) $form->get_value( self::FIELD );
 			$previous  = (bool) get_user_meta( $user_id, self::USER_META_KEY, true );
 
@@ -419,6 +877,8 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		 * @return void
 		 */
 		public function apply_toggle( $user_id ) {
+			$this->apply_custom_messages( $user_id );
+
 			if ( empty( $this->pending_toggle ) ) {
 				return;
 			}
@@ -458,6 +918,63 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				delete_user_meta( $user_id, self::USER_META_KEY );
 				$this->bulk_restore( $user_id );
 			}
+		}
+
+		/**
+		 * Saves the vendor's own away message once the user model has saved.
+		 *
+		 * @param int $user_id The saved user ID.
+		 * @return void
+		 */
+		private function apply_custom_messages( $user_id ) {
+			if ( empty( $this->pending_custom ) || (int) $this->pending_custom['user_id'] !== (int) $user_id ) {
+				return;
+			}
+
+			$custom               = $this->pending_custom;
+			$this->pending_custom = null;
+
+			$meta_map = [
+				self::USER_META_HEADLINE => $custom['headline'],
+				self::USER_META_MESSAGE  => $custom['message'],
+			];
+
+			foreach ( $meta_map as $meta_key => $value ) {
+				if ( '' === $value ) {
+					// Delete rather than store an empty value, so a cleared
+					// field leaves no meta row behind (same as the flag).
+					delete_user_meta( $user_id, $meta_key );
+				} else {
+					// The form values arrive unslashed, and update_user_meta()
+					// runs wp_unslash() on what it is given, which would eat
+					// any literal backslash a vendor typed. Slash to compensate.
+					update_user_meta( $user_id, $meta_key, wp_slash( $value ) );
+				}
+			}
+		}
+
+		/**
+		 * Returns a vendor's own away message, but only while the site owner
+		 * has vendor messages switched on: stored text must go quiet the
+		 * moment the feature is turned off, with no orphaned control.
+		 *
+		 * @param int $user_id The vendor's user ID.
+		 * @return array `headline` and `message`, each possibly empty.
+		 */
+		public function get_vendor_custom( $user_id ) {
+			$custom = [
+				'headline' => '',
+				'message'  => '',
+			];
+
+			if ( ! get_option( self::VENDOR_CUSTOM_OPTION ) ) {
+				return $custom;
+			}
+
+			$custom['headline'] = trim( (string) get_user_meta( $user_id, self::USER_META_HEADLINE, true ) );
+			$custom['message']  = trim( (string) get_user_meta( $user_id, self::USER_META_MESSAGE, true ) );
+
+			return $custom;
 		}
 
 		/* ---------------- ENFORCE while ON ---------------- */
@@ -532,16 +1049,35 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			// While holiday mode is on every visible listing is drafted, so
 			// the results container can only ever render core's "Nothing
 			// found" fallback here. Swap the container for our callback, so
-			// the vendor's away message appears in that exact place and
-			// style instead of a confusing empty-search message. Merging
-			// overwrites the block type while keeping its position.
-			return hivepress()->template->merge_blocks(
+			// the vendor's away message appears in that exact place instead
+			// of a confusing empty-search message. Merging overwrites the
+			// block type while keeping its position.
+			$blocks = hivepress()->template->merge_blocks(
 				$blocks,
 				[
 					'listings_container' => [
 						'type'     => 'callback',
 						'callback' => 'holiday_mode_for_hivepress_vendor_notice',
 						'params'   => [ $user_id ],
+						'return'   => true,
+					],
+				]
+			);
+
+			// Also blank the "Listings by ..." page heading: with no listings
+			// on show it would sit above the away notice announcing a list
+			// that is not there. A separate merge call because merge_blocks
+			// never visits a matched block's children in the same pass, so
+			// multi-target maps can silently drop entries. The Callback block
+			// needs a named function and __return_empty_string() is exactly
+			// that.
+			return hivepress()->template->merge_blocks(
+				$blocks,
+				[
+					'page_title' => [
+						'type'     => 'callback',
+						'callback' => '__return_empty_string',
+						'params'   => [],
 						'return'   => true,
 					],
 				]
@@ -1034,15 +1570,23 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				return;
 			}
 
+			$args = $this->get_notice_args( 'banner' );
+
 			$data = [
-				'url'     => $this->get_account_settings_url(),
-				'title'   => __( 'Holiday mode is ON.', 'holiday-mode-for-hivepress' ),
-				/* translators: %s is the linked "Account → Settings" text. */
-				'message' => __( 'Your listings are hidden until you turn this off in %s.', 'holiday-mode-for-hivepress' ),
-				'link'    => __( 'Account → Settings', 'holiday-mode-for-hivepress' ),
-				'dismiss' => __( 'Dismiss', 'holiday-mode-for-hivepress' ),
+				'url'        => $this->get_account_settings_url(),
+				'title'      => $args['label'],
+				'message'    => $args['message'],
+				'icon'       => $args['icon'],
+				'iconColor'  => $args['icon_color'],
+				'labelColor' => $args['label_color'],
+				'textColor'  => $args['text_color'],
+				'link'       => __( 'Account → Settings', 'holiday-mode-for-hivepress' ),
+				'dismiss'    => __( 'Dismiss', 'holiday-mode-for-hivepress' ),
 			];
 
+			// The icon name and colours are validated server-side (plain
+			// icon-name shape, 6-digit hex) before they are JSON-encoded, so
+			// they are safe inside className and cssText below.
 			$js = '(function(){try{' .
 				'if(!document.body.classList.contains("hp-template--user-account-page")){return;}' .
 				'if(document.getElementById("holiday-mode-for-hivepress-banner")){return;}' .
@@ -1052,24 +1596,31 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				'banner.id="holiday-mode-for-hivepress-banner";' .
 				'banner.setAttribute("role","status");' .
 				'banner.setAttribute("aria-live","polite");' .
-				'banner.style.cssText="position:sticky;top:0;z-index:9999;box-sizing:border-box;max-width:100%;background:#fff3cd;color:#664d03;border:1px solid #ffeeba;border-left:0;border-right:0;padding:0.5rem 1rem;margin-bottom:1rem;display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,.05)";' .
+				'banner.style.cssText="position:sticky;top:0.5rem;z-index:9999;box-sizing:border-box;max-width:100%;background:' . self::COLOR_BG . ';color:"+d.textColor+";border:1px solid ' . self::COLOR_BORDER . ';border-radius:0.5rem;padding:0.75rem 1rem;margin-bottom:1rem;display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,.05)";' .
+				'var icon=document.createElement("i");' .
+				'icon.className="fas fa-"+d.icon;' .
+				'icon.setAttribute("aria-hidden","true");' .
+				'icon.style.cssText="color:"+d.iconColor+";font-size:130%;line-height:1";' .
 				'var strong=document.createElement("strong");' .
+				'strong.style.color=d.labelColor;' .
 				'strong.appendChild(document.createTextNode(d.title));' .
 				'var span=document.createElement("span");' .
 				'var parts=String(d.message).split("%s");' .
 				'span.appendChild(document.createTextNode(parts[0]||""));' .
+				'if(parts.length>1){' .
 				'var a=document.createElement("a");' .
 				'a.href=d.url;a.style.color="inherit";' .
 				'a.appendChild(document.createTextNode(d.link));' .
 				'span.appendChild(a);' .
-				'span.appendChild(document.createTextNode(parts.length>1?parts[1]:""));' .
+				'span.appendChild(document.createTextNode(parts[1]||""));' .
+				'}' .
 				'var btn=document.createElement("button");' .
 				'btn.type="button";' .
 				'btn.setAttribute("aria-label",d.dismiss);' .
 				'btn.style.cssText="margin-left:auto;cursor:pointer;background:transparent;border:0;color:inherit;font-size:120%;line-height:1";' .
 				'btn.appendChild(document.createTextNode("×"));' .
 				'btn.addEventListener("click",function(){if(banner.parentNode){banner.parentNode.removeChild(banner);}});' .
-				'banner.appendChild(strong);banner.appendChild(span);banner.appendChild(btn);' .
+				'banner.appendChild(icon);banner.appendChild(strong);banner.appendChild(span);banner.appendChild(btn);' .
 				'if(target.firstChild){target.insertBefore(banner,target.firstChild);}else{target.appendChild(banner);}' .
 				'}catch(e){}})();';
 
@@ -1102,26 +1653,58 @@ if ( ! function_exists( 'holiday_mode_for_hivepress_vendor_notice' ) ) {
 	 * Renders the public "vendor is away" notice for a vendor profile page.
 	 *
 	 * A named function because HivePress's Callback block only accepts one.
-	 * All markup reuses core classes (widget card, `hp-status` pill,
-	 * `hp-meta` text) so every theme styles it natively with no CSS of ours.
+	 * An information box (icon, bold label, message) inline-styled with rem
+	 * spacing and percentage font sizes, so it scales with every theme and
+	 * ships no stylesheet. Core enqueues Font Awesome 5 solid site-wide, so
+	 * the icon font is always available on the front end.
 	 *
 	 * @param int $user_id The vendor's user ID.
 	 * @return string
 	 */
 	function holiday_mode_for_hivepress_vendor_notice( $user_id ) {
+		$plugin = holiday_mode_for_hivepress();
+
+		if ( ! $plugin ) {
+			return '';
+		}
+
+		$defaults = $plugin->get_notice_args( 'notice' );
+
+		// The vendor's own words, where the site owner has switched vendor
+		// messages on. Each field falls back independently, so a vendor who
+		// writes only a headline keeps the standard text under it. Colours
+		// and the icon always come from the site owner's settings.
+		$custom = $plugin->get_vendor_custom( $user_id );
+
+		if ( '' !== $custom['headline'] ) {
+			$defaults['label'] = $custom['headline'];
+		}
+
+		if ( '' !== $custom['message'] ) {
+			$defaults['message'] = $custom['message'];
+		}
+
 		/**
 		 * Filters the public vendor-away notice. Return an empty value to
-		 * remove the notice entirely, or change the `title` (the status
-		 * pill) and `message` (the text under it).
+		 * remove the notice entirely. Keys: `title` (the bold label),
+		 * `message` (the text under it), `icon` (bare Font Awesome name)
+		 * and `label_color` / `text_color` / `icon_color` (6-digit hex).
+		 * The values already reflect any admin customisation from the
+		 * settings tab, and the vendor's own away message where the site
+		 * owner has enabled vendor messages.
 		 *
-		 * @param array $notice  Notice strings: `title`, `message`.
+		 * @param array $notice  Notice arguments.
 		 * @param int   $user_id The vendor's user ID.
 		 */
 		$notice = apply_filters(
 			'holiday_mode_for_hivepress_vendor_notice',
 			[
-				'title'   => __( 'Away on holiday', 'holiday-mode-for-hivepress' ),
-				'message' => __( 'This vendor is taking a break at the moment, so they may take longer than usual to reply.', 'holiday-mode-for-hivepress' ),
+				'title'       => $defaults['label'],
+				'message'     => $defaults['message'],
+				'icon'        => $defaults['icon'],
+				'label_color' => $defaults['label_color'],
+				'text_color'  => $defaults['text_color'],
+				'icon_color'  => $defaults['icon_color'],
 			],
 			$user_id
 		);
@@ -1130,20 +1713,33 @@ if ( ! function_exists( 'holiday_mode_for_hivepress_vendor_notice' ) ) {
 			return '';
 		}
 
-		// Mirrors core's templates/page/no-results-message.php exactly
-		// (`.hp-no-results` with an h2 and a paragraph), so every theme
-		// styles the away message precisely like the message it replaces.
-		$output = '<div class="hp-no-results holiday-mode-for-hivepress-vendor-notice">';
+		// The filter can return anything, and the icon and colours land in
+		// class and style attributes, so validate them again here rather
+		// than trusting the save-time checks.
+		$icon = isset( $notice['icon'] ) && preg_match( '/^[a-z0-9-]+$/', (string) $notice['icon'] ) ? (string) $notice['icon'] : Holiday_Mode_For_HivePress::ICON_DEFAULT;
+
+		$label_color = isset( $notice['label_color'] ) && preg_match( '/^#[0-9a-fA-F]{6}$/', (string) $notice['label_color'] ) ? (string) $notice['label_color'] : Holiday_Mode_For_HivePress::COLOR_DEFAULT;
+
+		$text_color = isset( $notice['text_color'] ) && preg_match( '/^#[0-9a-fA-F]{6}$/', (string) $notice['text_color'] ) ? (string) $notice['text_color'] : Holiday_Mode_For_HivePress::COLOR_DEFAULT;
+
+		$icon_color = isset( $notice['icon_color'] ) && preg_match( '/^#[0-9a-fA-F]{6}$/', (string) $notice['icon_color'] ) ? (string) $notice['icon_color'] : $label_color;
+
+		$output = '<div class="holiday-mode-for-hivepress-vendor-notice" role="status" style="display:flex;align-items:flex-start;gap:0.75rem;box-sizing:border-box;background:' . esc_attr( Holiday_Mode_For_HivePress::COLOR_BG ) . ';border:1px solid ' . esc_attr( Holiday_Mode_For_HivePress::COLOR_BORDER ) . ';border-radius:0.5rem;padding:1rem;margin:0 0 2rem;">';
+
+		$output .= '<i class="fas fa-' . esc_attr( $icon ) . '" aria-hidden="true" style="color:' . esc_attr( $icon_color ) . ';font-size:150%;line-height:1.4;"></i>';
+
+		$output .= '<div>';
 
 		if ( ! empty( $notice['title'] ) ) {
-			$output .= '<h2>' . esc_html( $notice['title'] ) . '</h2>';
+			$output .= '<strong style="color:' . esc_attr( $label_color ) . ';">' . esc_html( $notice['title'] ) . '</strong>';
 		}
 
 		if ( ! empty( $notice['message'] ) ) {
-			$output .= '<p>' . esc_html( $notice['message'] ) . '</p>';
+			$margin  = empty( $notice['title'] ) ? '0' : '0.25rem';
+			$output .= '<p style="color:' . esc_attr( $text_color ) . ';margin:' . $margin . ' 0 0;">' . esc_html( $notice['message'] ) . '</p>';
 		}
 
-		return $output . '</div>';
+		return $output . '</div></div>';
 	}
 }
 
