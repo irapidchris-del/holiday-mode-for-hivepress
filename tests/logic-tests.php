@@ -658,6 +658,54 @@ namespace {
 			'L12 unticking Vendor Messages returns every profile to the site-wide message [1.7.0]' );
 	}
 
+	// Background and derived border (1.7.1).
+	reset_state();
+	$d = $INST->get_notice_args( 'notice' );
+	ok( isset( $d['bg_color'], $d['border_color'] ), 'L13 background and border keys present [1.7.1]' );
+	ok( '#d9edf7' === $d['bg_color'] && '#bce8f1' === $d['border_color'], 'L14 standard background keeps the standard border pairing [1.7.1]' );
+
+	reset_state();
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_notice_bg_color'] = '#ffffff';
+	$d = $INST->get_notice_args( 'notice' );
+	ok( '#ffffff' === $d['bg_color'] && '#e0e0e0' === $d['border_color'], 'L15 custom background shades its own border [1.7.1]' );
+
+	// The border maths must always yield a valid 6-digit hex, including at
+	// the extremes where rounding or padding could go wrong.
+	reset_state();
+	$edge_ok = true;
+	foreach ( [ '#000000', '#ffffff', '#010101', '#ff0000', '#0a0b0c' ] as $bg ) {
+		if ( ! preg_match( '/^#[0-9a-f]{6}$/', $INST->get_border_color( $bg ) ) ) { $edge_ok = false; }
+	}
+	ok( $edge_ok, 'L16 border is always a valid 6-digit hex (no short bytes) [1.7.1]' );
+	ok( '#000000' === $INST->get_border_color( '#000000' ), 'L17 black background yields black border, not a negative value [1.7.1]' );
+	ok( strcasecmp( $INST->get_border_color( '#D9EDF7' ), '#bce8f1' ) === 0, 'L18 standard-background match is case-insensitive [1.7.1]' );
+
+	// Banner and notice backgrounds stay independent.
+	reset_state();
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_banner_bg_color'] = '#ffffff';
+	ok( '#ffffff' === $INST->get_notice_args( 'banner' )['bg_color']
+		&& '#d9edf7' === $INST->get_notice_args( 'notice' )['bg_color'], 'L19 banner and notice backgrounds are independent [1.7.1]' );
+
+	// A malformed stored value must fall back rather than reach the maths.
+	reset_state();
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_notice_bg_color'] = 'red';
+	$d = $INST->get_notice_args( 'notice' );
+	ok( '#d9edf7' === $d['bg_color'] && '#bce8f1' === $d['border_color'], 'L20 invalid stored colour falls back to the standard pair [1.7.1]' );
+
+	if ( $VEN ) {
+		reset_state();
+		$GLOBALS['_options']['hp_holiday_mode_for_hivepress_notice_bg_color'] = '#ffffff';
+		$html = holiday_mode_for_hivepress_vendor_notice( 10 );
+		ok( false !== strpos( $html, '#ffffff' ) && false !== strpos( $html, '#e0e0e0' ), 'L21 profile notice renders the chosen background and its border [1.7.1]' );
+
+		// The filter can supply a background; anything malformed is rejected.
+		reset_state();
+		$GLOBALS['_filters']['holiday_mode_for_hivepress_vendor_notice'] = [ [ 'cb' => function ( $n ) { $n['bg_color'] = 'javascript:alert(1)'; return $n; }, 'prio' => 10, 'args' => 1 ] ];
+		$html = holiday_mode_for_hivepress_vendor_notice( 10 );
+		ok( false === strpos( $html, 'javascript' ), 'L22 malformed background from the filter is rejected [1.7.1]' );
+		unset( $GLOBALS['_filters']['holiday_mode_for_hivepress_vendor_notice'] );
+	}
+
 	echo "\n----------------------------------------\n";
 	echo "RESULT: {$GLOBALS['_pass']} passed, {$GLOBALS['_fail']} failed\n";
 	exit( $GLOBALS['_fail'] > 0 ? 1 : 0 );

@@ -3,7 +3,7 @@
  * Plugin Name:       Holiday Mode for HivePress
  * Plugin URI:        https://community.hivepress.io/u/chrisb/summary
  * Description:       Vendor-only Holiday Mode toggle that hides (drafts) and restores all of a vendor's listings, with an on-site banner while active and an away notice on the vendor's public profile. Restoring is entitlement-aware: it respects each listing's own expiry date, and any HivePress Membership or WooCommerce Subscription the vendor actually holds.
- * Version:           1.7.0
+ * Version:           1.7.1
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Requires Plugins:  hivepress
@@ -28,7 +28,7 @@ if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_REPO' ) ) {
 
 // Keep in step with the Version header above on every release.
 if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION' ) ) {
-	define( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION', '1.7.0' );
+	define( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION', '1.7.1' );
 }
 
 require_once __DIR__ . '/includes/class-holiday-mode-for-hivepress-updater.php';
@@ -330,6 +330,8 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			$banner_icon_default = $this->get_color_option( 'banner_label_color', self::COLOR_DEFAULT );
 			$notice_icon_default = $this->get_color_option( 'notice_label_color', self::COLOR_DEFAULT );
 
+			$bg_color_description = esc_html__( 'Pick a colour or paste a 6-digit hex code such as #d9edf7. Leave blank to use the standard light blue. The border shades itself to match, and if you choose a dark background, set the label and text colours to something light.', 'holiday-mode-for-hivepress' );
+
 			$settings[ self::SETTINGS_TAB ] = [
 				'title'    => esc_html__( 'Holiday Mode', 'holiday-mode-for-hivepress' ),
 				'_order'   => 100,
@@ -399,6 +401,16 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 									'data-default-color' => self::COLOR_DEFAULT,
 								],
 								'_order'      => 50,
+							],
+
+							'holiday_mode_for_hivepress_banner_bg_color' => [
+								'label'       => esc_html__( 'Banner Background Colour', 'holiday-mode-for-hivepress' ),
+								'description' => $bg_color_description,
+								'type'        => $color_type,
+								'attributes'  => [
+									'data-default-color' => self::COLOR_BG,
+								],
+								'_order'      => 60,
 							],
 						],
 					],
@@ -473,6 +485,16 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 									'data-default-color' => self::COLOR_DEFAULT,
 								],
 								'_order'      => 50,
+							],
+
+							'holiday_mode_for_hivepress_notice_bg_color' => [
+								'label'       => esc_html__( 'Notice Background Colour', 'holiday-mode-for-hivepress' ),
+								'description' => $bg_color_description,
+								'type'        => $color_type,
+								'attributes'  => [
+									'data-default-color' => self::COLOR_BG,
+								],
+								'_order'      => 60,
 							],
 						],
 					],
@@ -592,18 +614,45 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			}
 
 			$label_color = $this->get_color_option( $context . '_label_color', self::COLOR_DEFAULT );
+			$bg_color    = $this->get_color_option( $context . '_bg_color', self::COLOR_BG );
 
 			return [
-				'label'       => $this->get_text_option( $context . '_label', $label ),
-				'message'     => $this->get_text_option( $context . '_message', $message ),
-				'icon'        => $this->get_icon_option( $context . '_icon' ),
-				'label_color' => $label_color,
-				'text_color'  => $this->get_color_option( $context . '_text_color', self::COLOR_DEFAULT ),
+				'label'        => $this->get_text_option( $context . '_label', $label ),
+				'message'      => $this->get_text_option( $context . '_message', $message ),
+				'icon'         => $this->get_icon_option( $context . '_icon' ),
+				'label_color'  => $label_color,
+				'text_color'   => $this->get_color_option( $context . '_text_color', self::COLOR_DEFAULT ),
 
 				// A blank icon colour follows the label colour, custom or not,
 				// so the icon and label stay a matched pair by default.
-				'icon_color'  => $this->get_color_option( $context . '_icon_color', $label_color ),
+				'icon_color'   => $this->get_color_option( $context . '_icon_color', $label_color ),
+
+				'bg_color'     => $bg_color,
+				'border_color' => $this->get_border_color( $bg_color ),
 			];
+		}
+
+		/**
+		 * Returns the border colour for a notice background: the standard
+		 * pairing for the standard background, otherwise a slightly darker
+		 * shade of the chosen colour, so one background setting always
+		 * produces a matched box with no second field to keep in step.
+		 *
+		 * @param string $bg_color Validated 6-digit hex background colour.
+		 * @return string
+		 */
+		public function get_border_color( $bg_color ) {
+			if ( 0 === strcasecmp( $bg_color, self::COLOR_BG ) ) {
+				return self::COLOR_BORDER;
+			}
+
+			$border = '#';
+
+			foreach ( [ 1, 3, 5 ] as $offset ) {
+				$border .= sprintf( '%02x', (int) round( hexdec( substr( $bg_color, $offset, 2 ) ) * 0.88 ) );
+			}
+
+			return $border;
 		}
 
 		/**
@@ -1573,15 +1622,17 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			$args = $this->get_notice_args( 'banner' );
 
 			$data = [
-				'url'        => $this->get_account_settings_url(),
-				'title'      => $args['label'],
-				'message'    => $args['message'],
-				'icon'       => $args['icon'],
-				'iconColor'  => $args['icon_color'],
-				'labelColor' => $args['label_color'],
-				'textColor'  => $args['text_color'],
-				'link'       => __( 'Account → Settings', 'holiday-mode-for-hivepress' ),
-				'dismiss'    => __( 'Dismiss', 'holiday-mode-for-hivepress' ),
+				'url'         => $this->get_account_settings_url(),
+				'title'       => $args['label'],
+				'message'     => $args['message'],
+				'icon'        => $args['icon'],
+				'iconColor'   => $args['icon_color'],
+				'labelColor'  => $args['label_color'],
+				'textColor'   => $args['text_color'],
+				'bgColor'     => $args['bg_color'],
+				'borderColor' => $args['border_color'],
+				'link'        => __( 'Account → Settings', 'holiday-mode-for-hivepress' ),
+				'dismiss'     => __( 'Dismiss', 'holiday-mode-for-hivepress' ),
 			];
 
 			// The icon name and colours are validated server-side (plain
@@ -1596,7 +1647,7 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				'banner.id="holiday-mode-for-hivepress-banner";' .
 				'banner.setAttribute("role","status");' .
 				'banner.setAttribute("aria-live","polite");' .
-				'banner.style.cssText="position:sticky;top:0.5rem;z-index:9999;box-sizing:border-box;max-width:100%;background:' . self::COLOR_BG . ';color:"+d.textColor+";border:1px solid ' . self::COLOR_BORDER . ';border-radius:0.5rem;padding:0.75rem 1rem;margin-bottom:1rem;display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,.05)";' .
+				'banner.style.cssText="position:sticky;top:0.5rem;z-index:9999;box-sizing:border-box;max-width:100%;background:"+d.bgColor+";color:"+d.textColor+";border:1px solid "+d.borderColor+";border-radius:0.5rem;padding:0.75rem 1rem;margin-bottom:1rem;display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,.05)";' .
 				'var icon=document.createElement("i");' .
 				'icon.className="fas fa-"+d.icon;' .
 				'icon.setAttribute("aria-hidden","true");' .
@@ -1688,10 +1739,11 @@ if ( ! function_exists( 'holiday_mode_for_hivepress_vendor_notice' ) ) {
 		 * Filters the public vendor-away notice. Return an empty value to
 		 * remove the notice entirely. Keys: `title` (the bold label),
 		 * `message` (the text under it), `icon` (bare Font Awesome name)
-		 * and `label_color` / `text_color` / `icon_color` (6-digit hex).
-		 * The values already reflect any admin customisation from the
-		 * settings tab, and the vendor's own away message where the site
-		 * owner has enabled vendor messages.
+		 * and `label_color` / `text_color` / `icon_color` / `bg_color`
+		 * (6-digit hex; the border is derived from the background). The
+		 * values already reflect any admin customisation from the settings
+		 * tab, and the vendor's own away message where the site owner has
+		 * enabled vendor messages.
 		 *
 		 * @param array $notice  Notice arguments.
 		 * @param int   $user_id The vendor's user ID.
@@ -1705,6 +1757,7 @@ if ( ! function_exists( 'holiday_mode_for_hivepress_vendor_notice' ) ) {
 				'label_color' => $defaults['label_color'],
 				'text_color'  => $defaults['text_color'],
 				'icon_color'  => $defaults['icon_color'],
+				'bg_color'    => $defaults['bg_color'],
 			],
 			$user_id
 		);
@@ -1724,7 +1777,11 @@ if ( ! function_exists( 'holiday_mode_for_hivepress_vendor_notice' ) ) {
 
 		$icon_color = isset( $notice['icon_color'] ) && preg_match( '/^#[0-9a-fA-F]{6}$/', (string) $notice['icon_color'] ) ? (string) $notice['icon_color'] : $label_color;
 
-		$output = '<div class="holiday-mode-for-hivepress-vendor-notice" role="status" style="display:flex;align-items:flex-start;gap:0.75rem;box-sizing:border-box;background:' . esc_attr( Holiday_Mode_For_HivePress::COLOR_BG ) . ';border:1px solid ' . esc_attr( Holiday_Mode_For_HivePress::COLOR_BORDER ) . ';border-radius:0.5rem;padding:1rem;margin:0 0 2rem;">';
+		$bg_color = isset( $notice['bg_color'] ) && preg_match( '/^#[0-9a-fA-F]{6}$/', (string) $notice['bg_color'] ) ? (string) $notice['bg_color'] : Holiday_Mode_For_HivePress::COLOR_BG;
+
+		$border_color = $plugin->get_border_color( $bg_color );
+
+		$output = '<div class="holiday-mode-for-hivepress-vendor-notice" role="status" style="display:flex;align-items:flex-start;gap:0.75rem;box-sizing:border-box;background:' . esc_attr( $bg_color ) . ';border:1px solid ' . esc_attr( $border_color ) . ';border-radius:0.5rem;padding:1rem;margin:0 0 2rem;">';
 
 		$output .= '<i class="fas fa-' . esc_attr( $icon ) . '" aria-hidden="true" style="color:' . esc_attr( $icon_color ) . ';font-size:150%;line-height:1.4;"></i>';
 
