@@ -4,7 +4,7 @@ Tags: hivepress, marketplace, vendor, listings, holiday
 Requires at least: 6.0
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 1.6.1
+Stable tag: 1.7.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -63,8 +63,10 @@ holiday mode must not invent that punishment either.
 * `holiday_mode_for_hivepress_is_vendor` ( bool $is_vendor, int $user_id )
   Return true to treat a user as a vendor (who then sees the toggle).
 * `holiday_mode_for_hivepress_vendor_notice` ( array $notice, int $user_id )
-  Change the `title` and `message` of the public "away" notice shown on the
-  vendor's profile page, or return an empty value to remove it.
+  Change the `title`, `message`, `icon`, `label_color`, `text_color` or
+  `icon_color` of the public "away" notice shown on the vendor's profile page,
+  or return an empty value to remove it. The values already reflect any
+  customisation made under HivePress → Settings → Holiday Mode.
 
 = Automatic updates =
 
@@ -163,14 +165,27 @@ holiday mode.
 
 = Do buyers know that I am away? =
 
-Yes. While holiday mode is on, your public vendor profile replaces the usual
-empty "Nothing found" message with an "Away on holiday" notice in exactly
-the same style, letting buyers know you may take longer than usual to
-reply. It disappears the moment you switch holiday mode off. On sites with
-page caching, it can take until the cache next refreshes for the notice to
-appear or disappear for logged-out visitors. Site owners can reword or
-remove the notice with the `holiday_mode_for_hivepress_vendor_notice`
-filter.
+Yes. While holiday mode is on, your public vendor profile replaces the
+"Listings by ..." heading and the listings area with a clear "On holiday"
+information notice, letting visitors know you are away rather than gone,
+and (where the Messages extension is active) that you may take longer than
+usual to reply. It disappears the moment you switch holiday mode off. On
+sites with page caching, it can take until the cache next refreshes for the
+notice to appear or disappear for logged-out visitors.
+
+Site owners can change the notice's wording, icon and colours under
+HivePress → Settings → Holiday Mode, and developers can reword or remove it
+entirely with the `holiday_mode_for_hivepress_vendor_notice` filter.
+
+= Can vendors write their own away message? =
+
+Yes, if you allow it. Tick "Let each vendor write their own away message"
+under HivePress → Settings → Holiday Mode, and every vendor gets two extra
+fields under their Holiday mode switch: a headline and a short explanation.
+Their words then replace the site-wide message on their own profile, using
+the same icon and colours you chose. A vendor who leaves the fields blank
+gets the standard notice, and if you untick the setting later, every profile
+goes back to the site-wide message immediately, whatever vendors typed.
 
 = What happens to my products and bookings while I am away? =
 
@@ -181,6 +196,27 @@ cancelled. Your per-listing Statistics page is unavailable while a listing
 is hidden and returns when it is restored.
 
 == Changelog ==
+
+= 1.7.0 =
+* Changed: both notices now use a clear information-box design, a light blue
+  panel with an icon, a bold label and the message text, on the vendor's
+  account pages and on their public profile alike.
+* Changed: while holiday mode is on, the vendor's public profile no longer
+  shows the "Listings by ..." heading above the away notice, so visitors see
+  one clear explanation instead of a heading for a list that is not there.
+* Added: the profile notice's standard wording now mentions sending a message
+  only on sites where the HivePress Messages extension is active.
+* Added: a Vendor Banner section and a Profile Notice section under
+  HivePress → Settings → Holiday Mode. Each lets you set the label, the
+  message, the icon (chosen from HivePress's own icon list) and the label,
+  text and icon colours, with a colour picker. Leave any field blank to keep
+  the standard design.
+* Added: an optional Vendor Messages setting. With it ticked, each vendor
+  gets an "Away message headline" and "Away message text" field under their
+  Holiday mode switch, and their own words appear on their profile in place
+  of the site-wide message, keeping the site's icon and colours. Vendors who
+  leave the fields blank get the standard notice, and unticking the setting
+  returns every profile to the site-wide message.
 
 = 1.6.1 =
 * Added: a one-time tidy-up after updating that removes the leftover empty

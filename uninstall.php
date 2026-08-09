@@ -5,8 +5,9 @@
  * Runs when the plugin is deleted from the Plugins screen, never on
  * deactivation, so switching the plugin off temporarily loses nothing.
  *
- * **Deleting the plugin keeps the owner's settings by default.** Someone who
- * deletes a plugin by accident, or removes it to install a clean copy, gets
+ * **Deleting the plugin keeps the owner's settings by default**, along with
+ * any away messages vendors wrote for themselves. Someone who deletes a
+ * plugin by accident, or removes it to install a clean copy, gets
  * their settings back when they reinstall. Destruction is opt-in, through the
  * "Delete All Data" checkbox in the Removing the Plugin section of the
  * settings page, and is never a surprise.
@@ -142,6 +143,13 @@ foreach ( (array) $hm_transients as $hm_transient_name ) {
  */
 
 if ( $hm_delete_all ) {
+
+	// The away messages vendors wrote for themselves. On the retain path they
+	// survive alongside the settings (they are stored words, not enforcement
+	// state, and vendors reuse them holiday after holiday); the delete path
+	// wipes them like everything else.
+	delete_metadata( 'user', 0, '_holiday_mode_for_hivepress_headline', '', true );
+	delete_metadata( 'user', 0, '_holiday_mode_for_hivepress_message', '', true );
 
 	// Delete the settings. The "delete all data" option itself is excluded
 	// here and removed at the very end: if this run fails part-way through,
