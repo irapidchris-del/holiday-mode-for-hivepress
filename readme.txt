@@ -4,7 +4,7 @@ Tags: hivepress, marketplace, vendor, listings, holiday
 Requires at least: 6.0
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 1.5.0
+Stable tag: 1.6.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -128,9 +128,17 @@ check immediately, use the "Check for updates" link on the plugin's row.
 
 = What happens to my listings if I delete the plugin? =
 
-On uninstall, any listings still hidden by the plugin are restored to their
-previous status and all of the plugin's data is removed, so nothing is left
-stranded in draft.
+Every hidden listing is restored to the status it had, and holiday mode is
+switched off for everyone, so nothing is ever left stranded out of sight.
+Listings whose own expiry date has already passed stay as drafts, exactly as
+they would anywhere else.
+
+Your settings are kept, so you can reinstall and carry on. WordPress shows a
+warning on the delete screen saying the plugin's data goes too, but that
+warning appears for every plugin that has an uninstall file and does not
+apply here unless you tick "Delete All Data" under HivePress → Settings →
+Holiday Mode first. Switching the plugin off, rather than deleting it,
+changes nothing at all.
 
 = Does holiday mode give my listings extra time before they expire? =
 
@@ -173,6 +181,22 @@ cancelled. Your per-listing Statistics page is unavailable while a listing
 is hidden and returns when it is restored.
 
 == Changelog ==
+
+= 1.6.1 =
+* Added: a one-time tidy-up after updating that removes the leftover empty
+  database rows written by versions before 1.3.2 whenever a vendor switched
+  holiday mode off. Vendors currently on holiday are untouched.
+
+= 1.6.0 =
+* Added: a settings page (HivePress → Settings → Holiday Mode), reachable
+  from the Settings link on the plugin's row, with a "Delete All Data"
+  choice.
+* Changed: deleting the plugin now KEEPS your settings unless you ask for
+  them to be removed. It still always restores hidden listings and switches
+  holiday mode off, so nothing is left stranded.
+* Fixed: update checks no longer send your site's address and WordPress
+  version to GitHub. They now identify only the plugin and its version.
+* Changed: the "requires HivePress" notice is now dismissible.
 
 = 1.5.0 =
 * Added: listings are no longer brought back if their own expiry date passed
