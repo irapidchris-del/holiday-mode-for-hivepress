@@ -4,7 +4,7 @@ Tags: hivepress, marketplace, vendor, listings, holiday
 Requires at least: 6.0
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 1.7.0
+Stable tag: 1.7.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -196,6 +196,11 @@ cancelled. Your per-listing Statistics page is unavailable while a listing
 is hidden and returns when it is restored.
 
 == Changelog ==
+
+= 1.7.1 =
+* Added: a Background Colour setting for each notice. The border shades
+  itself to match the chosen background, so one colour is all you set.
+  Leave it blank to keep the standard light blue.
 
 = 1.7.0 =
 * Changed: both notices now use a clear information-box design, a light blue
