@@ -15,12 +15,12 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-if ( ! class_exists( 'Holiday_Mode_For_HivePress_Updater' ) ) :
+if ( ! class_exists( 'Hphm_Updater' ) ) :
 
 	/**
 	 * Serves GitHub releases to the WordPress update system.
 	 */
-	final class Holiday_Mode_For_HivePress_Updater {
+	final class Hphm_Updater {
 
 		/**
 		 * Cached release payload.
@@ -277,6 +277,7 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress_Updater' ) ) :
 				'requires_php'  => $plugin_data['RequiresPHP'],
 				'last_updated'  => $release['published'],
 				'download_link' => $release['package'],
+				'donate_link'   => HPHM_SUPPORT_URL,
 				'sections'      => [
 					'description' => wpautop( esc_html( $plugin_data['Description'] ) ),
 					'changelog'   => $release['notes'] ? wpautop( esc_html( $release['notes'] ) ) : '<p>' . esc_html__( 'See the GitHub releases page for the changelog.', 'holiday-mode-for-hivepress' ) . '</p>',

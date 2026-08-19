@@ -1,13 +1,13 @@
 <?php
 /**
  * Plugin Name:       Holiday Mode for HivePress
- * Plugin URI:        https://community.hivepress.io/u/chrisb/summary
+ * Plugin URI:        https://github.com/irapidchris-del/holiday-mode-for-hivepress
  * Description:       Vendor-only Holiday Mode toggle that hides (drafts) and restores all of a vendor's listings, with an on-site banner while active and an away notice on the vendor's public profile. Restoring is entitlement-aware: it respects each listing's own expiry date, and any HivePress Membership or WooCommerce Subscription the vendor actually holds.
- * Version:           1.7.1
+ * Version:           1.7.2
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Requires Plugins:  hivepress
- * Author:            Chris Bruce
+ * Author:            ChrisB @ HivePress Community
  * Author URI:        https://community.hivepress.io/u/chrisb/summary
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
@@ -22,6 +22,13 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+/**
+ * The author's support page.
+ *
+ * One place, so the Plugins row and the View details popup can never drift apart.
+ */
+define( 'HPHM_SUPPORT_URL', 'https://ko-fi.com/chrisbathivepresscommunity' );
+
 if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_REPO' ) ) {
 	define( 'HOLIDAY_MODE_FOR_HIVEPRESS_REPO', 'irapidchris-del/holiday-mode-for-hivepress' );
 }
@@ -31,7 +38,7 @@ if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION' ) ) {
 	define( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION', '1.7.1' );
 }
 
-require_once __DIR__ . '/includes/class-holiday-mode-for-hivepress-updater.php';
+require_once __DIR__ . '/includes/class-hphm-updater.php';
 
 if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 
@@ -1812,8 +1819,8 @@ if ( ! function_exists( 'holiday_mode_for_hivepress_bootstrap' ) ) {
 		// dependency can still receive plugin updates. It is registered on
 		// every request (not just admin) so background update checks run by
 		// WP-Cron also see our releases; the remote lookup itself is cached.
-		if ( class_exists( 'Holiday_Mode_For_HivePress_Updater' ) ) {
-			new Holiday_Mode_For_HivePress_Updater( __FILE__, HOLIDAY_MODE_FOR_HIVEPRESS_REPO );
+		if ( class_exists( 'Hphm_Updater' ) ) {
+			new Hphm_Updater( __FILE__, HOLIDAY_MODE_FOR_HIVEPRESS_REPO );
 		}
 
 		if ( ! function_exists( 'hivepress' ) ) {
@@ -1841,3 +1848,31 @@ if ( ! function_exists( 'holiday_mode_for_hivepress_missing_hivepress_notice' ) 
 }
 
 add_action( 'plugins_loaded', 'holiday_mode_for_hivepress_bootstrap' );
+
+/**
+ * Adds the house "Donate" link to this plugin's row on the Plugins screen.
+ *
+ * WordPress fires plugin_row_meta for EVERY plugin on the screen, so without the basename
+ * test the link would appear on every row on the site. The markup is copied verbatim from
+ * the house spec in `releasing.md` rather than composed here: every plugin's row has to look
+ * identical and sessions have drifted before. The label is exactly "Donate", matching the
+ * wording WordPress itself uses in the details popup, and the icon is a Dashicon rather than
+ * Font Awesome because Dashicons is the admin's own font and is always loaded there.
+ * WordPress joins row-meta items with " | " itself, so this returns a bare anchor.
+ *
+ * @param array<string> $meta        Row meta links.
+ * @param string        $plugin_file Plugin file the row belongs to.
+ * @return array<string>
+ */
+function hphm_add_row_meta( $meta, $plugin_file ) {
+	if ( plugin_basename( __FILE__ ) === $plugin_file ) {
+		$meta[] = '<a href="' . esc_url( HPHM_SUPPORT_URL ) . '" target="_blank" rel="noopener noreferrer">'
+			. '<span class="dashicons dashicons-star-filled" style="font-size:14px;line-height:1.3;"></span> '
+			. esc_html__( 'Donate', 'holiday-mode-for-hivepress' )
+			. '</a>';
+	}
+
+	return $meta;
+}
+
+add_filter( 'plugin_row_meta', 'hphm_add_row_meta', 10, 2 );
