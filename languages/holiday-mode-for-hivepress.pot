@@ -314,3 +314,11 @@ msgstr ""
 #: includes/class-hphm-updater.php:425
 msgid "Could not rename the update directory."
 msgstr ""
+
+#: includes/class-hphm-updater.php:716
+msgid "No releases have been published for Holiday Mode for HivePress yet, so there is nothing to update to. This is normal for a brand new copy and does not mean anything is wrong."
+msgstr ""
+
+#: includes/class-hphm-updater.php:719
+msgid "GitHub limits how many update checks one server may make each hour, and this server has reached that limit. Nothing is wrong with the plugin or your site, and checking will work again within the hour."
+msgstr ""

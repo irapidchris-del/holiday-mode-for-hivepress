@@ -3,7 +3,7 @@
  * Plugin Name:       Holiday Mode for HivePress
  * Plugin URI:        https://github.com/irapidchris-del/holiday-mode-for-hivepress
  * Description:       Vendor-only Holiday Mode toggle that hides (drafts) and restores all of a vendor's listings, with an on-site banner while active and an away notice on the vendor's public profile. Restoring is entitlement-aware: it respects each listing's own expiry date, and any HivePress Membership or WooCommerce Subscription the vendor actually holds.
- * Version:           1.7.2
+ * Version:           1.7.3
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Requires Plugins:  hivepress
@@ -35,7 +35,7 @@ if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_REPO' ) ) {
 
 // Keep in step with the Version header above on every release.
 if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION' ) ) {
-	define( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION', '1.7.1' );
+	define( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION', '1.7.3' );
 }
 
 require_once __DIR__ . '/includes/class-hphm-updater.php';
