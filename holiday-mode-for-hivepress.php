@@ -3,7 +3,7 @@
  * Plugin Name:       Holiday Mode for HivePress
  * Plugin URI:        https://github.com/irapidchris-del/holiday-mode-for-hivepress
  * Description:       Vendor-only Holiday Mode toggle that hides (drafts) and restores all of a vendor's listings, with an on-site banner while active and an away notice on the vendor's public profile. Restoring is entitlement-aware: it respects each listing's own expiry date, and any HivePress Membership or WooCommerce Subscription the vendor actually holds.
- * Version:           1.7.3
+ * Version:           1.7.4
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Requires Plugins:  hivepress
@@ -35,7 +35,7 @@ if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_REPO' ) ) {
 
 // Keep in step with the Version header above on every release.
 if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION' ) ) {
-	define( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION', '1.7.3' );
+	define( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION', '1.7.4' );
 }
 
 require_once __DIR__ . '/includes/class-hphm-updater.php';
@@ -966,13 +966,37 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 					return;
 				}
 
-				$this->bulk_set_draft( $user_id );
+				$hidden = $this->bulk_set_draft( $user_id );
+
+				/**
+				 * Fires when a vendor switches holiday mode on, once their listings are hidden.
+				 *
+				 * @hook holiday_mode_for_hivepress/started
+				 * @param {int} $user_id The vendor's user ID.
+				 * @param {int} $hidden How many listings were hidden.
+				 */
+				do_action( 'holiday_mode_for_hivepress/started', $user_id, $hidden );
 			} else {
 				// Delete the flag rather than storing an empty value, so
 				// switching off leaves no meta row behind (stale empty rows
 				// were observed accumulating on staging, 2026-08-04).
 				delete_user_meta( $user_id, self::USER_META_KEY );
-				$this->bulk_restore( $user_id );
+
+				$counts = $this->bulk_restore( $user_id );
+
+				/**
+				 * Fires when a vendor switches holiday mode off, once their listings are back.
+				 *
+				 * The two counts are deliberately separate. Listings that expired while the vendor
+				 * was away stay hidden, and burying that inside a welcome-back count is exactly how
+				 * it goes unnoticed.
+				 *
+				 * @hook holiday_mode_for_hivepress/ended
+				 * @param {int} $user_id The vendor's user ID.
+				 * @param {int} $restored How many listings were made visible again.
+				 * @param {int} $expired How many stayed hidden because they had expired.
+				 */
+				do_action( 'holiday_mode_for_hivepress/ended', $user_id, $counts['restored'], $counts['expired'] );
 			}
 		}
 
@@ -1073,6 +1097,22 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				]
 			);
 			$this->suspend_enforce = false;
+
+			/**
+			 * Fires when a listing is pushed back to hidden because holiday mode is still on.
+			 *
+			 * This is the one that answers "why will my listing not publish?" before it is asked. A
+			 * scheduled listing going live, or a new one submitted mid-holiday, currently disappears
+			 * with no explanation anywhere in the interface.
+			 *
+			 * The bulk pass at holiday start sets `suspend_enforce` and returns above, so switching
+			 * holiday mode on never fires this once per listing on top of the start notification.
+			 *
+			 * @hook holiday_mode_for_hivepress/enforced
+			 * @param {int} $listing_id The listing that was hidden again.
+			 * @param {int} $user_id The vendor's user ID.
+			 */
+			do_action( 'holiday_mode_for_hivepress/enforced', $listing_id, $user_id );
 		}
 
 		/* ---------------- Vendor page notice ---------------- */
@@ -1267,10 +1307,11 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		 * untouched so they are not published on restore.
 		 *
 		 * @param int $user_id The vendor user ID.
-		 * @return void
+		 * @return int How many listings were hidden.
 		 */
 		private function bulk_set_draft( $user_id ) {
 			$listing_ids = $this->get_vendor_listings( $user_id, self::HIDEABLE );
+			$hidden      = 0;
 
 			$this->suspend_enforce = true;
 			foreach ( $listing_ids as $listing_id ) {
@@ -1285,8 +1326,11 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 						'post_status' => 'draft',
 					]
 				);
+				++$hidden;
 			}
 			$this->suspend_enforce = false;
+
+			return $hidden;
 		}
 
 		/**
@@ -1296,7 +1340,7 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		 * left as-is. The tracking meta is always cleared.
 		 *
 		 * @param int $user_id The vendor user ID.
-		 * @return void
+		 * @return array `restored` and `expired` counts.
 		 */
 		private function bulk_restore( $user_id ) {
 			$listing_ids = $this->get_vendor_listings( $user_id, 'any', true );
@@ -1328,18 +1372,31 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				remove_action( 'hivepress/v1/models/listing/update_status', [ $listener[0], $listener[1] ], 10 );
 			}
 
+			$restored = 0;
+			$expired  = 0;
+
 			$this->suspend_enforce = true;
 			foreach ( $listing_ids as $listing_id ) {
 				$prev = get_post_meta( $listing_id, self::LISTING_META_PREV, true );
 				$curr = get_post_status( $listing_id );
 
-				if ( 'draft' === $curr && in_array( $prev, self::HIDEABLE, true ) && ! $this->is_listing_expired( $listing_id ) ) {
-					wp_update_post(
-						[
-							'ID'          => $listing_id,
-							'post_status' => $prev,
-						]
-					);
+				if ( 'draft' === $curr && in_array( $prev, self::HIDEABLE, true ) ) {
+					// A listing whose own paid period ran out while it was hidden stays hidden,
+					// because holiday mode must never buy a listing extra time. Counted separately
+					// so the caller can say so: the behaviour is correct but completely invisible,
+					// and a vendor comes back from holiday quietly short of listings.
+					if ( $this->is_listing_expired( $listing_id ) ) {
+						++$expired;
+					} else {
+						wp_update_post(
+							[
+								'ID'          => $listing_id,
+								'post_status' => $prev,
+							]
+						);
+
+						++$restored;
+					}
 				}
 
 				delete_post_meta( $listing_id, self::LISTING_META_PREV );
@@ -1349,6 +1406,11 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			foreach ( $suspended as $listener ) {
 				add_action( 'hivepress/v1/models/listing/update_status', [ $listener[0], $listener[1] ], 10, $listener[2] );
 			}
+
+			return [
+				'restored' => $restored,
+				'expired'  => $expired,
+			];
 		}
 
 		/**
