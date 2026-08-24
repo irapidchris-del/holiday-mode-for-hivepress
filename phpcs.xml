@@ -4,6 +4,14 @@
 
 	<exclude-pattern>vendor/*</exclude-pattern>
 
+	<!-- The test harness is not production code and never ships (package.ps1
+	     excludes tests?/). It deliberately breaks the standards it would be
+	     measured against: it redefines core WordPress functions as stubs, keeps
+	     whole assertions on one line so a failure reads as one grep-able line,
+	     and has no file or function doc blocks by design. Linting it produced
+	     695 errors that said nothing about the plugin. -->
+	<exclude-pattern>tests/*</exclude-pattern>
+
 	<rule ref="WordPress">
 		<exclude name="WordPress.PHP.StrictInArray.MissingTrueStrict"/>
 		<exclude name="WordPress.NamingConventions.ValidHookName.UseUnderscores"/>

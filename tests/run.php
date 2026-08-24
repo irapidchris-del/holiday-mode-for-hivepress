@@ -16,6 +16,7 @@ $runs = [
 	'logic: Badges active'            => [ 'logic-tests.php', [ 'HM_BADGES' => '1' ] ],
 	'logic: Messages active'          => [ 'logic-tests.php', [ 'HM_MESSAGES' => '1' ] ],
 	'logic: no Subscriptions, no Vendor model' => [ 'logic-tests.php', [ 'HM_WCS' => 'absent', 'HM_VENDOR' => 'absent' ] ],
+	'logic: no Memberships'           => [ 'logic-tests.php', [ 'HM_MEMBERSHIPS' => 'absent' ] ],
 	'updater'                         => [ 'updater-tests.php', [] ],
 ];
 
@@ -26,16 +27,24 @@ $failed_runs  = [];
 foreach ( $runs as $label => $run ) {
 	list( $script, $env ) = $run;
 
-	$prefix = '';
-
+	// Environment is passed through putenv() rather than a `NAME=value cmd`
+	// shell prefix: that syntax is bash-only, and on Windows cmd.exe it made
+	// every variant run die with "'HM_BADGES' is not recognized as an internal
+	// or external command" while still reporting a plain FAIL. putenv() is
+	// inherited by the child process on both platforms.
 	foreach ( $env as $key => $value ) {
-		// Only the value is escaped: a shell assignment's name must be bare.
-		$prefix .= $key . '=' . escapeshellarg( $value ) . ' ';
+		putenv( $key . '=' . $value );
 	}
 
-	$command = $prefix . escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( __DIR__ . '/' . $script );
+	$command = escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( __DIR__ . '/' . $script );
 
+	$output = [];
 	exec( $command . ' 2>&1', $output, $status );
+
+	// Never leak one variant's environment into the next.
+	foreach ( array_keys( $env ) as $key ) {
+		putenv( $key );
+	}
 
 	$summary = '';
 

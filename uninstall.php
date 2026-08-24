@@ -45,7 +45,14 @@ $hm_delete_all = (bool) get_option( 'hp_holiday_mode_for_hivepress_delete_data' 
 
 $hm_user_meta_key    = '_holiday_mode_for_hivepress';
 $hm_listing_meta_key = '_holiday_mode_for_hivepress_prev_status';
-$hm_hideable         = [ 'publish', 'pending', 'private', 'future' ];
+// Every status holiday mode has ever recorded on a listing it hid, spelled out
+// rather than read from the "Statuses to Hide" setting added in 1.7.6. That
+// setting says what a FUTURE holiday would hide; this loop is putting listings
+// back where they already were. Reading the setting here would strand every
+// hidden listing whose recorded status the owner had since unticked, and
+// strand it permanently, because this file runs as the plugin is removed and
+// nothing comes along afterwards to try again.
+$hm_restorable = [ 'publish', 'pending', 'private', 'future' ];
 
 /*
  * -----------------------------------------------------------------------------
@@ -102,7 +109,7 @@ foreach ( (array) $hm_listing_ids as $hm_listing_id ) {
 	// listing visible time it is no longer entitled to.
 	$hm_is_expired = '' !== $hm_expired && (int) $hm_expired && (int) $hm_expired < time();
 
-	if ( 'draft' === get_post_status( $hm_listing_id ) && in_array( $hm_prev, $hm_hideable, true ) && ! $hm_is_expired ) {
+	if ( 'draft' === get_post_status( $hm_listing_id ) && in_array( $hm_prev, $hm_restorable, true ) && ! $hm_is_expired ) {
 		wp_update_post(
 			[
 				'ID'          => $hm_listing_id,

@@ -4,64 +4,107 @@ Tags: hivepress, marketplace, vendor, listings, holiday
 Requires at least: 6.0
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 1.7.4
+Stable tag: 1.7.6
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-A vendor-only Holiday Mode toggle for HivePress that hides and restores all of a vendor's listings, with an on-site banner while active.
+A Holiday Mode toggle for HivePress that hides and restores all of a vendor's listings, with an on-site banner while active.
 
 == Description ==
 
 Holiday Mode for HivePress adds a "Holiday mode" checkbox to the HivePress
 account settings page (Account → Settings). When a vendor enables it, all of
-their visible and scheduled listings are hidden (set to draft) at once. While
-holiday mode is on, any listing that becomes visible is automatically pushed
-back to draft, and a banner is shown on the vendor's account pages so they
-always know their listings are hidden.
+their visible and scheduled listings are hidden from visitors at once. While
+holiday mode is on, any listing that becomes visible is automatically hidden
+again, and a banner is shown on the vendor's account pages so they always know
+their listings are hidden.
 
 When the vendor turns holiday mode off, their listings are restored to the
 exact status they had before (published stays published, scheduled stays
 scheduled, and so on). Listings that were already drafts, or that were changed
 by the vendor or an administrator during the holiday period, are left untouched.
 
+= What you can set =
+
+Two things are yours to decide, and both arrive set the way the plugin has
+always behaved, so updating changes nothing until you change it.
+
+**Who is offered the switch.** Out of the box that is anyone HivePress has
+given a vendor profile plus anyone who has written a listing, whatever its
+status. You can narrow it to vendor profiles only, or hand it to particular
+user roles instead, under HivePress → Settings → Holiday Mode → Who Can Use
+Holiday Mode. Administrators always see it, whichever you choose.
+
+**Which listings are hidden.** Published, pending, private and scheduled
+listings are all hidden, and all four are ticked to begin with under Hiding
+Listings. Untick any you would rather leave visible while a vendor is away.
+Narrowing this only changes what a future holiday hides: listings already
+hidden always come back to the status they actually had, so nobody is left
+stranded out of sight by a change made while they are away.
+
 = Restore gating =
 
 Holiday mode never becomes a way to get something the vendor is not entitled
-to, and never punishes a vendor for having used it. Two independent checks
-run when holiday mode is switched off.
+to, and never punishes a vendor for having used it.
 
 **Each listing keeps its own expiry date.** Hiding a listing does not pause
 its expiry, so a listing whose date passed while it was hidden is not
-brought back: it stays a draft with that date intact, ready for the vendor's
+brought back: it stays hidden with that date intact, ready for the vendor's
 usual Renew option. Every other listing is restored to exactly the status it
 had.
 
-**A vendor is held to the membership they actually hold.** If the vendor
-holds a HivePress Membership, or a WooCommerce Subscription, it must be
-active for them to switch holiday mode off. If it has lapsed, the change is
-refused with an explanation, and their listings stay hidden until it is
-renewed. Administrators, and anyone who can edit other people's listings,
-always bypass this.
+**An unrelated subscription can no longer trap a vendor on holiday.**
+Versions before 1.7.5 gated the switch-off on the vendor's WooCommerce
+Subscription as well as their HivePress Membership. Because there is no way
+to tell a subscription that governs listings from one that pays for
+something unrelated, that gate could trap a vendor for good over a lapsed
+newsletter subscription, so the subscription check has been removed.
 
-Crucially, only a system the vendor is actually enrolled in gets a say. A
-vendor who has never held a membership or subscription is never blocked,
-even on a site where those systems are installed for other purposes. That
-matches how HivePress itself behaves: no HivePress extension hides a
-vendor's existing listings when their membership or package runs out, so
-holiday mode must not invent that punishment either.
+**The HivePress Memberships check is now yours to switch on, and is off
+until you do.** Tick "Membership Required to Restore" under HivePress →
+Settings → Holiday Mode → Restoring Listings and a vendor whose membership
+has lapsed is asked to renew before their listings come back. Leave it
+unticked, which is how every site starts and how every site upgrading from
+1.7.5 or earlier arrives, and a lapsed membership is simply not consulted.
+
+It was made a choice in 1.7.6 because an imposed gate protected nothing.
+HivePress does not re-gate listings that are already published: when a
+membership lapses it emails the vendor and closes the membership record,
+and the submission limit turns away someone submitting or renewing a
+listing, but no part of HivePress hides or re-checks the listings a vendor
+already has out. A lapsed member who never touched holiday mode therefore
+keeps every listing visible, so refusing to end the holiday for the vendor
+next to them took nothing back from anybody: it only left the one who used
+the feature worse off.
+
+Whichever way you set it, the gate still only bites where HivePress
+Memberships is active AND membership restrictions cover listings, and only
+for a vendor who actually holds a membership. Anyone who can edit other
+people's listings bypasses it entirely. A site whose own code really does
+hide listings on lapse can add its own gate through the
+`holiday_mode_for_hivepress_entitlement` filter below.
 
 = Developer filters =
 
 * `holiday_mode_for_hivepress_entitlement` ( array $entitlement, int $user_id )
   The full decision behind switching holiday mode off: `allowed` (bool),
-  `reason` (string, e.g. `ungoverned`, `bypass`, `memberships_lapsed`,
-  `subscriptions_lapsed`) and `message` (the text shown to the vendor when a
-  switch-off is refused). Use this to plug in any other membership system.
+  `reason` (string, `ungoverned`, `memberships_active`, `memberships_lapsed`,
+  or `bypass` for anyone who can edit other people's listings) and `message`
+  (the text shown to the vendor when a switch-off is refused). Out of the box
+  the plugin never passes `allowed` as false: it does so only for a lapsed
+  HivePress Membership, on a site restricting listings, where the owner has
+  ticked "Membership Required to Restore". Until then `reason` is
+  `ungoverned` for every vendor and the membership is not consulted at all.
+  Use this filter to wire in any other system that genuinely hides listings
+  when it lapses.
 * `holiday_mode_for_hivepress_has_active_membership` ( bool $has_access, int $user_id )
-  The original, simpler filter, still supported: it receives the decision the
-  bundled checks reached and can override it.
+  The original, simpler filter, still supported: it receives the same
+  decision and can override it.
 * `holiday_mode_for_hivepress_is_vendor` ( bool $is_vendor, int $user_id )
-  Return true to treat a user as a vendor (who then sees the toggle).
+  Return true to treat a user as a vendor (who then sees the toggle). It runs
+  after the "Who Can Use Holiday Mode" setting has been applied and has the
+  final say either way, so a site with its own idea of who counts can still
+  override any of the three choices.
 * `holiday_mode_for_hivepress_vendor_notice` ( array $notice, int $user_id )
   Change the `title`, `message`, `icon`, `label_color`, `text_color` or
   `icon_color` of the public "away" notice shown on the vendor's profile page,
@@ -77,10 +120,9 @@ row on the Plugins page. Update checks are cached for 6 hours.
 
 == Requirements ==
 
-* HivePress (required).
-* HivePress Memberships, Paid Listings or WooCommerce Subscriptions
-  (all optional; holiday mode recognises whichever of them a vendor is
-  enrolled in).
+* HivePress (required). Works alongside HivePress Memberships, Paid Listings
+  and WooCommerce Subscriptions without needing any of them, and does not
+  gate restoring on any of them unless you ask it to.
 
 == Installation ==
 
@@ -97,8 +139,28 @@ screen, with no need to download the ZIP again.
 
 = Who can see the Holiday mode toggle? =
 
-Vendors (users with a HivePress vendor profile or at least one listing) and
-administrators.
+Out of the box, vendors (users with a HivePress vendor profile or at least one
+listing, whatever its status) and administrators.
+
+You can change that under HivePress → Settings → Holiday Mode → Who Can Use
+Holiday Mode. "Vendors only" drops the second half, so somebody whose listing
+is still unfinished waits until HivePress has made them a vendor. "Chosen
+roles" ignores both tests and goes purely by the roles you tick, which suits a
+site where the people who need the switch are not the people HivePress calls
+vendors. Administrators keep seeing it either way, and the
+`holiday_mode_for_hivepress_is_vendor` filter still has the final say.
+
+= Can I stop holiday mode hiding some kinds of listing? =
+
+Yes. Published, pending, private and scheduled listings are all hidden to
+begin with, and each one is a tick box under HivePress → Settings → Holiday
+Mode → Hiding Listings. Untick any you would rather leave where it is.
+
+Narrowing the list only affects holidays that start afterwards. A listing that
+is already hidden comes back to the status it actually had when it was hidden,
+whatever the setting says by then, so changing your mind while vendors are
+away never costs anybody a listing. Unticking every box is read as all four,
+because a holiday mode that hides nothing would be a switch that does nothing.
 
 = What happens to listings that were already drafts? =
 
@@ -108,19 +170,44 @@ unpublished drafts are never published for you.
 
 = A vendor can't turn holiday mode off. Why? =
 
-The membership or subscription they hold is not active, and the message on
-screen says which. Once it is renewed they can switch holiday mode off and
-their listings are restored. Administrators are always exempt.
+Out of the box, every vendor always can. A switch-off is refused for one of
+two reasons, and neither of them is in force until you put it there.
 
-This only ever applies to a vendor who actually holds one: a vendor who has
-never had a membership or subscription is never blocked, even if those
-systems are installed for other purposes.
+The first is the "Membership Required to Restore" setting under HivePress →
+Settings → Holiday Mode → Restoring Listings. If you have ticked it, and you
+run HivePress Memberships with membership restrictions covering listings,
+then a vendor holding a lapsed membership is asked to renew before their
+listings come back, and the message on the form says so. Untick it and that
+refusal stops. Sites upgrading from 1.7.5 or earlier arrive with it unticked,
+so if a vendor could not end their holiday before the update and can now,
+this is why.
+
+The second is your own code, or another plugin, using either of the
+entitlement filters listed above: `holiday_mode_for_hivepress_entitlement`,
+or the older `holiday_mode_for_hivepress_has_active_membership`.
+
+Two older gates are gone. Versions before 1.7.5 also refused a switch-off
+while a vendor's WooCommerce Subscription was lapsed, which could trap a
+vendor for good over a subscription that had nothing to do with their
+listings. Versions before 1.7.6 applied the membership gate whether you had
+asked for it or not.
+
+Separately from all of this, a listing whose own expiry date passed while it
+was hidden stays hidden and keeps that date, ready for the usual Renew
+option. That is not a refusal to end the holiday, and it is exactly where
+HivePress itself would leave the listing.
 
 = Does it require WooCommerce Subscriptions or Memberships? =
 
-No. Both are optional. With neither installed, and for any vendor not
-enrolled in them, holiday mode simply switches on and off freely. Each
-listing's own expiry date is always respected either way.
+Neither is required, and neither gates anything unless you ask. WooCommerce
+Subscriptions is not checked at all. HivePress Memberships is checked only
+when all three of these are true: the extension is active, membership
+restrictions cover listings, and you have ticked "Membership Required to
+Restore" under HivePress → Settings → Holiday Mode. With that ticked, a
+vendor holding a lapsed membership is asked to renew before their listings
+come back; a vendor who has never held a membership is never refused. With
+it unticked, which is the default everywhere, holiday mode switches on and
+off freely. Each listing's own expiry date is always respected either way.
 
 = How do I get updates? =
 
@@ -132,7 +219,7 @@ check immediately, use the "Check for updates" link on the plugin's row.
 
 Every hidden listing is restored to the status it had, and holiday mode is
 switched off for everyone, so nothing is ever left stranded out of sight.
-Listings whose own expiry date has already passed stay as drafts, exactly as
+Listings whose own expiry date has already passed stay hidden, exactly as
 they would anywhere else.
 
 Your settings are kept, so you can reinstall and carry on. WordPress shows a
@@ -148,7 +235,7 @@ No. A listing that has an expiry date keeps exactly that date: holiday mode
 never moves it, so the clock keeps running for the whole time you are away.
 
 If the date passes while your listings are hidden, they are not brought back
-when you switch holiday mode off. They stay as drafts with their expiry date
+when you switch holiday mode off. They stay hidden with their expiry date
 untouched, ready for the usual Renew option, which is exactly where
 HivePress itself would leave them. Taking a holiday is not a way to get more
 days out of a listing.
@@ -196,6 +283,53 @@ cancelled. Your per-listing Statistics page is unavailable while a listing
 is hidden and returns when it is restored.
 
 == Changelog ==
+
+= 1.7.6 =
+* Changed - holding a vendor's listings back over a lapsed HivePress Membership is now a setting you
+  switch on, "Membership Required to Restore" under HivePress → Settings → Holiday Mode → Restoring
+  Listings, and it starts unticked on every site, including every site updating from an earlier
+  version. Nothing is switched on to preserve the old behaviour, because there was nothing to
+  preserve: HivePress does not re-gate listings that are already published. When a membership lapses
+  it emails the vendor and closes the membership record, and the submission limit turns away someone
+  submitting or renewing a listing, but nothing hides or re-checks the listings a vendor already has
+  out. A lapsed member who never used holiday mode kept every listing visible, so refusing to end
+  the holiday for the vendor beside them took nothing back from anyone and only left the one who
+  used the feature worse off, with listings eventually cleaned up as old hidden ones. If you
+  deliberately want that gate, tick the new box and it behaves exactly as before.
+* Added - "Who Can Use Holiday Mode" under HivePress → Settings → Holiday Mode. Choose between
+  vendors and anyone with a listing (how it has always worked, and what every site starts and
+  upgrades on), vendors only, or roles you tick yourself. Administrators always see the switch
+  whichever you pick, and the `holiday_mode_for_hivepress_is_vendor` filter still runs last and
+  still has the final word in both directions.
+* Added - "Statuses to Hide" under Hiding Listings, so published, pending, private and scheduled
+  listings no longer have to be hidden as a set. All four are ticked to begin with. Narrowing the
+  list changes only what a future holiday hides: a listing already hidden is always restored to the
+  status it actually had, whatever the setting says by the time the vendor comes back, so nobody
+  loses a listing to a change made while they were away. Unticking every box is read as all four.
+* Changed - the readme and the Plugins-screen description no longer call a hidden or restored
+  listing a draft. It is how WordPress stores them, not what they are, and reading "your listings
+  are drafts" is alarming in a way the actual behaviour is not.
+* No change to how a hidden listing is restored, to each listing's own expiry date being respected,
+  to the capability bypass, or to either developer filter.
+
+= 1.7.5 =
+* Fixed - a vendor can no longer be trapped on holiday by an unrelated subscription. Switching
+  holiday mode off was refused unless the vendor's WooCommerce Subscription was active, but there
+  is no way to tell a subscription that governs listings from one that pays for a newsletter, so a
+  vendor who once bought any subscription and let it lapse could never end their holiday, and
+  their hidden listings were eventually swept away by tools that tidy up old unpublished posts. The
+  subscription check cannot be
+  narrowed to the right products, so it has been removed. The HivePress Memberships check is
+  unchanged: it only applies where you have switched listing restrictions on, and only to a vendor
+  who actually holds a membership. Each listing's own expiry date is still respected, and a site
+  with its own entitlement rules can still refuse a switch-off through the
+  `holiday_mode_for_hivepress_entitlement` filter.
+* Fixed - a listing removed by an admin during a vendor's holiday can no longer come back on its
+  own. The end-of-holiday restore could not see trashed listings, so such a listing kept its
+  "restore me" marker forever, and if an admin later untrashed it for review, the vendor's NEXT
+  holiday cycle republished it without anyone deciding that. Trashing a listing now clears the
+  marker immediately, and the restore sweep also cleans up markers on listings whose status was
+  changed some other way in the meantime.
 
 = 1.7.4 =
 * Three new hooks so Notifications for HivePress can confirm holiday mode going on and off, and warn
@@ -268,7 +402,7 @@ is hidden and returns when it is restored.
 
 = 1.5.0 =
 * Added: listings are no longer brought back if their own expiry date passed
-  while they were hidden. They stay drafts, ready to renew, exactly where
+  while they were hidden. They stay hidden, ready to renew, exactly where
   HivePress itself would leave them, so a holiday can never buy a listing
   extra visible time.
 * Added: HivePress Memberships support. A vendor holding a membership must
@@ -343,8 +477,8 @@ is hidden and returns when it is restored.
 
 = 1.2.1 =
 * Added: a "Holiday mode" column on the Listings screen in wp-admin, so site
-  owners can see at a glance which drafts are listings hidden by holiday mode
-  and which status each one returns to.
+  owners can see at a glance which listings are hidden by holiday mode and
+  which status each one returns to.
 
 = 1.2.0 =
 * Fixed: switching holiday mode off from the settings form had no effect.
@@ -370,8 +504,8 @@ is hidden and returns when it is restored.
   off or restore/hide listings. The toggle now runs only from the account
   settings form.
 * Fixed: switching holiday mode off without an active subscription is now
-  refused with a clear message instead of leaving listings stranded in draft
-  with every on-screen indicator cleared.
+  refused with a clear message instead of leaving listings stranded out of
+  sight with every on-screen indicator cleared.
 * Fixed: listings that were already drafts are no longer force-published on
   restore.
 * Fixed: trashing a listing while holiday mode is on no longer immediately
@@ -393,6 +527,22 @@ is hidden and returns when it is restored.
 * Initial release.
 
 == Upgrade Notice ==
+
+= 1.7.6 =
+Running HivePress Memberships? To keep the old behaviour, tick "Membership
+Required to Restore" under HivePress → Settings → Holiday Mode → Restoring
+Listings. It now arrives unticked on every site, including yours, because the
+gate only ever penalised vendors who used holiday mode. Everyone else:
+recommended, and nothing changes until you want it to. Two new settings
+choose who is offered the switch and which listings it hides, and both arrive
+set exactly as the plugin already behaved.
+
+= 1.7.5 =
+Recommended for every site, and important for any site selling WooCommerce
+Subscriptions of any kind: a vendor with a lapsed subscription could be
+locked into holiday mode permanently. That check has been removed. Membership
+based restoring is unchanged, and a listing an admin removed during a holiday
+can no longer republish itself on a later holiday cycle.
 
 = 1.5.0 =
 Recommended for everyone. Buyers now see an "Away on holiday" notice on the

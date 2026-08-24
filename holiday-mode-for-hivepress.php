@@ -2,8 +2,8 @@
 /**
  * Plugin Name:       Holiday Mode for HivePress
  * Plugin URI:        https://github.com/irapidchris-del/holiday-mode-for-hivepress
- * Description:       Vendor-only Holiday Mode toggle that hides (drafts) and restores all of a vendor's listings, with an on-site banner while active and an away notice on the vendor's public profile. Restoring is entitlement-aware: it respects each listing's own expiry date, and any HivePress Membership or WooCommerce Subscription the vendor actually holds.
- * Version:           1.7.4
+ * Description:       Holiday Mode toggle that hides and restores all of a vendor's listings, with an on-site banner while active and an away notice on the vendor's public profile. Restoring respects each listing's own expiry date, so a holiday never buys a listing extra visible time.
+ * Version:           1.7.6
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Requires Plugins:  hivepress
@@ -35,7 +35,7 @@ if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_REPO' ) ) {
 
 // Keep in step with the Version header above on every release.
 if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION' ) ) {
-	define( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION', '1.7.4' );
+	define( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION', '1.7.6' );
 }
 
 require_once __DIR__ . '/includes/class-hphm-updater.php';
@@ -82,6 +82,27 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		const VENDOR_CUSTOM_OPTION = 'hp_holiday_mode_for_hivepress_vendor_custom';
 
 		/**
+		 * Option switching the HivePress Memberships restore gate on. Off by
+		 * default since 1.7.6; see get_entitlement() for why.
+		 */
+		const REQUIRE_MEMBERSHIP_OPTION = 'hp_holiday_mode_for_hivepress_require_membership';
+
+		/**
+		 * Option choosing who is offered the holiday mode switch, plus the
+		 * companion role list read only when that option is set to 'roles'.
+		 * Both are blank out of the box, which means the 1.7.5 behaviour.
+		 */
+		const AUDIENCE_OPTION       = 'hp_holiday_mode_for_hivepress_audience';
+		const AUDIENCE_ROLES_OPTION = 'hp_holiday_mode_for_hivepress_audience_roles';
+
+		/**
+		 * Option choosing which listing statuses holiday mode hides. Blank
+		 * means every status in self::HIDEABLE, so an upgrading site keeps
+		 * exactly the behaviour it had.
+		 */
+		const HIDEABLE_OPTION = 'hp_holiday_mode_for_hivepress_hideable_statuses';
+
+		/**
 		 * Listing post meta storing the status a listing had before it was hidden.
 		 */
 		const LISTING_META_PREV = '_holiday_mode_for_hivepress_prev_status';
@@ -101,10 +122,26 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		const FIELD_CUSTOM_PRESENT = 'holiday_mode_for_hivepress_custom_present';
 
 		/**
-		 * Statuses that represent a visible/scheduled listing we should hide.
-		 * Anything else (draft, trash, auto-draft, inherit) is left untouched.
+		 * Every status that represents a visible/scheduled listing holiday mode
+		 * knows how to hide, and therefore every status it may ever have
+		 * recorded on a hidden listing. Anything else (draft, trash,
+		 * auto-draft, inherit) is left untouched.
+		 *
+		 * Since 1.7.6 the owner may hide a narrower set than this, so this
+		 * constant is NOT the hide list: get_hideable_statuses() is. It stays
+		 * the full set on purpose, because it is what the settings screen
+		 * offers and what the restore path measures a recorded status against.
 		 */
 		const HIDEABLE = [ 'publish', 'pending', 'private', 'future' ];
+
+		/**
+		 * Statuses a hidden listing must never be restored INTO, whatever its
+		 * recorded previous status says. A marker holding one of these could
+		 * only come from corrupt data or a third party writing the meta by
+		 * hand, and acting on it would either be a no-op or resurrect content
+		 * somebody removed.
+		 */
+		const NOT_RESTORABLE = [ 'draft', 'trash', 'auto-draft', 'inherit' ];
 
 		/**
 		 * Default colour for the notice text, labels and icons, and the
@@ -192,6 +229,14 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			// later save.
 			add_action( 'hivepress/v1/models/listing/create', [ $this, 'enforce_draft_while_holiday' ], 1000 );
 			add_action( 'hivepress/v1/models/listing/update', [ $this, 'enforce_draft_while_holiday' ], 1000 );
+
+			// A trashed listing leaves holiday mode's custody at once: the
+			// previous-status marker goes with it, or a later untrash plus
+			// holiday cycle would republish removed content (see
+			// clear_marker_on_trash for the full trap). The core hook names
+			// the exact transition; the model 'update' hook above also fires
+			// on a trash, but only alongside every other save.
+			add_action( 'trashed_post', [ $this, 'clear_marker_on_trash' ] );
 
 			// Banner on account pages while holiday mode is active.
 			add_action( 'wp_footer', [ $this, 'maybe_print_banner' ], 1000 );
@@ -309,6 +354,15 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		 * what that wording is. Colours likewise stay blank so the built-in
 		 * palette can evolve without walking back stored values.
 		 *
+		 * The behavioural fields added in 1.7.6 follow the same rule for a
+		 * sharper reason: HivePress copies every `default` straight into the
+		 * options table on activation
+		 * (`hivepress/includes/components/class-admin.php:265`), so a default
+		 * here is not a suggestion, it is a decision taken on behalf of every
+		 * site that upgrades. Each one is therefore left blank and read as the
+		 * pre-1.7.6 behaviour by get_audience() and get_hideable_statuses(),
+		 * which is the only way an upgrade can be guaranteed to change nothing.
+		 *
 		 * @param array $settings Settings configuration.
 		 * @return array
 		 */
@@ -339,11 +393,81 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 
 			$bg_color_description = esc_html__( 'Pick a colour or paste a 6-digit hex code such as #d9edf7. Leave blank to use the standard light blue. The border shades itself to match, and if you choose a dark background, set the label and text colours to something light.', 'holiday-mode-for-hivepress' );
 
+			// The blank key is the current behaviour on purpose. Core's Select
+			// field prepends its own '&mdash;' placeholder option whenever the
+			// options array has no '' key (`hivepress/includes/fields/class-select.php:171-178`),
+			// which would put an em-dash on the screen and, worse, make the
+			// default read as "nothing chosen". Naming the blank option keeps
+			// the stored value empty (so no 'default' is ever written to the
+			// database) while the screen still says what empty means.
+			$audience_options = [
+				''        => esc_html__( 'Vendors and anyone with a listing (recommended)', 'holiday-mode-for-hivepress' ),
+				'vendors' => esc_html__( 'Vendors only', 'holiday-mode-for-hivepress' ),
+				'roles'   => esc_html__( 'Chosen roles', 'holiday-mode-for-hivepress' ),
+			];
+
+			// The Chosen Roles field is deliberately NOT given `'_parent' =>
+			// 'holiday_mode_for_hivepress_audience'`. HivePress's dependent-field
+			// support is truthiness-only: it shows the child whenever the parent
+			// holds any non-empty value at all
+			// (`hivepress/assets/js/common.js:1280-1289`), which is right for the
+			// checkbox parents core uses it with and wrong for a three-way
+			// select, because "Vendors only" would reveal a role list that is
+			// never read. Two plain fields plus a description that says when the
+			// second one applies is honest; a box that appears at the wrong
+			// moment is not.
+			$role_options = [];
+
+			if ( function_exists( 'wp_roles' ) ) {
+				foreach ( wp_roles()->get_names() as $role_slug => $role_name ) {
+					// A role name can come from any plugin on the site, so it is
+					// escaped here rather than trusted the way a core status
+					// label could be.
+					$role_options[ $role_slug ] = esc_html( translate_user_role( $role_name ) );
+				}
+			}
+
+			// Core's own labels, so "Scheduled" and "Pending Review" read the
+			// same here as on the Listings screen. They are registered in
+			// wp-settings.php, long before this filter runs, but the fallback
+			// covers a site that has somehow unregistered one.
+			$status_options = [];
+
+			foreach ( self::HIDEABLE as $status ) {
+				$status_object = get_post_status_object( $status );
+
+				$status_options[ $status ] = esc_html( $status_object && $status_object->label ? $status_object->label : $status );
+			}
+
 			$settings[ self::SETTINGS_TAB ] = [
 				'title'    => esc_html__( 'Holiday Mode', 'holiday-mode-for-hivepress' ),
 				'_order'   => 100,
 
 				'sections' => [
+					'holiday_mode_for_hivepress_access'  => [
+						'title'       => esc_html__( 'Who Can Use Holiday Mode', 'holiday-mode-for-hivepress' ),
+						'description' => esc_html__( 'Administrators always see the switch, whichever choice you make here, so you can try it on your own account.', 'holiday-mode-for-hivepress' ),
+						'_order'      => 5,
+
+						'fields'      => [
+							'holiday_mode_for_hivepress_audience' => [
+								'label'       => esc_html__( 'Offer the Switch To', 'holiday-mode-for-hivepress' ),
+								'description' => esc_html__( 'Leave this alone unless you have a reason to narrow it. Vendors and anyone with a listing is how the plugin has always behaved: a user counts if HivePress has given them a vendor profile, or if they have written at least one listing in any status. Vendors only drops that second half, so somebody whose listing is still unfinished does not get the switch until HivePress has made them a vendor. Chosen roles ignores both tests and goes purely by the roles you tick below.', 'holiday-mode-for-hivepress' ),
+								'type'        => 'select',
+								'options'     => $audience_options,
+								'_order'      => 10,
+							],
+
+							'holiday_mode_for_hivepress_audience_roles' => [
+								'label'       => esc_html__( 'Chosen Roles', 'holiday-mode-for-hivepress' ),
+								'description' => esc_html__( 'Read only when the choice above is set to chosen roles, and ignored entirely otherwise. A user holding any one of the ticked roles is offered the switch. Tick nothing and nobody but an administrator is, which is worth knowing before you set the choice above and walk away.', 'holiday-mode-for-hivepress' ),
+								'type'        => 'checkboxes',
+								'options'     => $role_options,
+								'_order'      => 20,
+							],
+						],
+					],
+
 					'holiday_mode_for_hivepress_banner'  => [
 						'title'       => esc_html__( 'Vendor Banner', 'holiday-mode-for-hivepress' ),
 						'description' => esc_html__( 'This banner appears at the top of the account pages, but only for a vendor whose own holiday mode is switched on. It reminds them that their listings are currently hidden. Leave any field blank to use the standard design.', 'holiday-mode-for-hivepress' ),
@@ -502,6 +626,38 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 									'data-default-color' => self::COLOR_BG,
 								],
 								'_order'      => 60,
+							],
+						],
+					],
+
+					'holiday_mode_for_hivepress_hiding'  => [
+						'title'       => esc_html__( 'Hiding Listings', 'holiday-mode-for-hivepress' ),
+						'description' => esc_html__( 'Holiday mode only ever touches listings in the statuses ticked below. Anything else, including a vendor\'s own unfinished listings and anything in the bin, is left exactly where it is.', 'holiday-mode-for-hivepress' ),
+						'_order'      => 25,
+
+						'fields'      => [
+							'holiday_mode_for_hivepress_hideable_statuses' => [
+								'label'       => esc_html__( 'Statuses to Hide', 'holiday-mode-for-hivepress' ),
+								'description' => esc_html__( 'Leave all four ticked unless you have a reason not to. Narrowing this changes only what a future holiday hides: listings already hidden still come back to the status they actually had, so nothing a vendor is away on is stranded by a change made here. Unticking every box is read as all four, because a holiday mode that hides nothing would be a switch that does nothing.', 'holiday-mode-for-hivepress' ),
+								'type'        => 'checkboxes',
+								'options'     => $status_options,
+								'_order'      => 10,
+							],
+						],
+					],
+
+					'holiday_mode_for_hivepress_restore' => [
+						'title'       => esc_html__( 'Restoring Listings', 'holiday-mode-for-hivepress' ),
+						'description' => esc_html__( 'Holiday mode brings a vendor\'s listings back when they switch it off. This section decides whether a lapsed HivePress Membership is allowed to stand in the way.', 'holiday-mode-for-hivepress' ),
+						'_order'      => 30,
+
+						'fields'      => [
+							'holiday_mode_for_hivepress_require_membership' => [
+								'label'       => esc_html__( 'Membership Required to Restore', 'holiday-mode-for-hivepress' ),
+								'caption'     => esc_html__( 'Ask a vendor to renew a lapsed membership before their listings come back', 'holiday-mode-for-hivepress' ),
+								'description' => esc_html__( 'Leave this unticked unless you deliberately want that gate. With it ticked, a vendor whose HivePress Membership has lapsed cannot switch holiday mode off: they are asked to renew first, and their listings stay hidden until they do. It has any effect at all only where HivePress Memberships is active and membership restrictions cover listings. Bear in mind that HivePress leaves a vendor\'s already published listings visible when their membership lapses, so ticking this asks something of a vendor who used holiday mode that is asked of nobody else.', 'holiday-mode-for-hivepress' ),
+								'type'        => 'checkbox',
+								'_order'      => 10,
 							],
 						],
 					],
@@ -752,14 +908,17 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				$form['fields'] = [];
 			}
 
-			// Mention the restore gate only where one will actually apply:
-			// the bundled gate needs WooCommerce Subscriptions, and promising
-			// a "membership" check the plugin never performs misleads vendors
-			// (found on staging, 2026-08-04).
+			// Mention the restore gate only where one will actually apply. The
+			// bundled gate is HivePress Memberships alone, and since 1.7.6
+			// only where the site owner has switched it on, so promising a
+			// check the plugin does not perform misleads vendors - the same
+			// trap the pre-1.3.1 wording fell into (found on staging,
+			// 2026-08-04). The old subscription sentence went with the
+			// subscription check (see get_entitlement).
 			$description = __( 'Turn this on to hide all of your listings until you switch it off.', 'holiday-mode-for-hivepress' );
 
-			if ( function_exists( 'wcs_user_has_subscription' ) ) {
-				$description .= ' ' . __( 'Your listings are restored when you switch it off, as long as your subscription is active at that time.', 'holiday-mode-for-hivepress' );
+			if ( $this->membership_gate_enabled() && $this->memberships_govern_listings() ) {
+				$description .= ' ' . __( 'Your listings are restored when you switch it off, as long as your membership is active at that time.', 'holiday-mode-for-hivepress' );
 			}
 
 			$form['fields'][ self::FIELD ] = [
@@ -842,9 +1001,9 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		/* ---------------- Validate / gate ---------------- */
 
 		/**
-		 * Reads the submitted toggle from the settings form, enforces the
-		 * membership gate for switching off, and records the intent to apply
-		 * after the model saves.
+		 * Reads the submitted toggle from the settings form, applies any
+		 * site-installed entitlement filter for switching off, and records
+		 * the intent to apply after the model saves.
 		 *
 		 * Runs only during the genuine User_Update form submission, so unrelated
 		 * profile updates (WooCommerce account edits, wp-admin user edits, any
@@ -908,6 +1067,13 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			}
 
 			if ( ! $submitted ) {
+				// Out of the box nothing here refuses: the bundled Memberships
+				// gate is opt-in since 1.7.6, so a switch-off is refused only
+				// where the owner ticked "Membership Required to Restore" and
+				// the vendor's membership has lapsed, or where a site's own
+				// code says so through the entitlement filters. See
+				// get_entitlement for why the gate is a choice rather than a
+				// rule.
 				$entitlement = $this->get_entitlement( $user_id );
 
 				if ( ! $entitlement['allowed'] ) {
@@ -1072,8 +1238,9 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			}
 
 			$curr = get_post_status( $listing_id );
-			if ( ! in_array( $curr, self::HIDEABLE, true ) ) {
-				// Leave draft, trash, auto-draft, inherit, etc. alone.
+			if ( ! in_array( $curr, $this->get_hideable_statuses(), true ) ) {
+				// Leave draft, trash, auto-draft, inherit, and anything the
+				// owner has taken off the hide list, alone.
 				return;
 			}
 
@@ -1113,6 +1280,33 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			 * @param {int} $user_id The vendor's user ID.
 			 */
 			do_action( 'holiday_mode_for_hivepress/enforced', $listing_id, $user_id );
+		}
+
+		/**
+		 * Drops the previous-status marker the moment a listing is trashed.
+		 *
+		 * A listing trashed mid-holiday - an admin takedown, or the vendor
+		 * deleting it themselves - has been removed by someone with the right
+		 * to overrule the promise to bring it back, so the marker must not
+		 * survive the removal. Left behind, it outlives the trash state:
+		 * untrashing parks the post in draft (WordPress restores trashed
+		 * posts to draft since 5.6), which is exactly the shape bulk_restore
+		 * looks for, so a stale marker would let the vendor's NEXT holiday
+		 * cycle republish content somebody deliberately took down - with the
+		 * Badges/Paid Listings listeners deliberately stood down for the
+		 * transition, no less. The restore sweep clears leftover markers too,
+		 * but only when a restore happens to run; this closes the window at
+		 * the source.
+		 *
+		 * @param int $post_id The trashed post ID.
+		 * @return void
+		 */
+		public function clear_marker_on_trash( $post_id ) {
+			if ( 'hp_listing' !== get_post_type( $post_id ) ) {
+				return;
+			}
+
+			delete_post_meta( $post_id, self::LISTING_META_PREV );
 		}
 
 		/* ---------------- Vendor page notice ---------------- */
@@ -1237,8 +1431,80 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		/* ---------------- Vendor detection ---------------- */
 
 		/**
-		 * Determines whether a user is a vendor (has a vendor profile or has
-		 * authored at least one listing).
+		 * Returns the site owner's answer to "who is offered the switch".
+		 *
+		 * An unrecognised or empty stored value means 'listings', which is what
+		 * the plugin did before 1.7.6. See add_settings() for why the option is
+		 * allowed to be empty rather than carrying a `default`.
+		 *
+		 * @return string One of 'listings', 'vendors' or 'roles'.
+		 */
+		private function get_audience() {
+			// Scalar-checked before the cast, the way every other option reader
+			// in this file is. An option row is writable by anything on the
+			// site - an importer, WP-CLI, another plugin - and casting an array
+			// straight to string raises an "Array to string conversion" warning
+			// on PHP 8 every time this runs, which is once per capability check.
+			$audience = get_option( self::AUDIENCE_OPTION );
+			$audience = is_scalar( $audience ) ? (string) $audience : '';
+
+			return in_array( $audience, [ 'vendors', 'roles' ], true ) ? $audience : 'listings';
+		}
+
+		/**
+		 * Returns the roles ticked under Chosen Roles, as a clean slug list.
+		 *
+		 * @return array
+		 */
+		private function get_audience_roles() {
+			$roles = get_option( self::AUDIENCE_ROLES_OPTION );
+
+			if ( ! is_array( $roles ) ) {
+				$roles = [];
+			}
+
+			return array_values(
+				array_filter(
+					array_map(
+						static function ( $role ) {
+							return is_scalar( $role ) ? (string) $role : '';
+						},
+						$roles
+					)
+				)
+			);
+		}
+
+		/**
+		 * Whether a user holds any of the roles ticked under Chosen Roles.
+		 *
+		 * @param int $user_id The user ID.
+		 * @return bool
+		 */
+		private function user_has_chosen_role( $user_id ) {
+			$roles = $this->get_audience_roles();
+
+			if ( ! $roles ) {
+				return false;
+			}
+
+			$user = get_userdata( $user_id );
+
+			if ( ! $user || empty( $user->roles ) ) {
+				return false;
+			}
+
+			return (bool) array_intersect( $roles, array_map( 'strval', (array) $user->roles ) );
+		}
+
+		/**
+		 * Determines whether a user may use holiday mode.
+		 *
+		 * Named for what it meant before 1.7.6, when the only answer was "has a
+		 * vendor profile or has authored a listing". That is still the default
+		 * and still what the `holiday_mode_for_hivepress_is_vendor` filter is
+		 * handed, so the name and the filter both stay put; what changed is
+		 * that the site owner can now narrow the question.
 		 *
 		 * @param int $user_id The user ID.
 		 * @return bool
@@ -1249,54 +1515,125 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				return false;
 			}
 
-			if ( isset( $this->vendor_cache[ $user_id ] ) ) {
-				return $this->vendor_cache[ $user_id ];
+			$audience = $this->get_audience();
+
+			// The cache is keyed by the settings the verdict was reached under,
+			// not by user ID alone. A settings save and a later capability check
+			// can share one request, and the memoised answer from before the
+			// save would otherwise be handed back after it: the owner would move
+			// to "Vendors only", reload, and still see the switch offered to a
+			// listing author until the next page load, which reads as the
+			// setting not working. The roles list is in the key for the same
+			// reason, since it can change without the mode changing.
+			$cache_key = $audience . '|' . implode( ',', $this->get_audience_roles() ) . '|' . $user_id;
+
+			if ( isset( $this->vendor_cache[ $cache_key ] ) ) {
+				return $this->vendor_cache[ $cache_key ];
 			}
 
 			$is_vendor = false;
 
-			// Canonical: a HivePress vendor profile linked to this user.
-			if ( function_exists( 'hivepress' ) && class_exists( '\HivePress\Models\Vendor' ) ) {
-				try {
-					$vendor_id = \HivePress\Models\Vendor::query()->filter(
-						[ 'user' => $user_id ]
-					)->get_first_id();
-					if ( $vendor_id ) {
+			if ( 'roles' === $audience ) {
+				$is_vendor = $this->user_has_chosen_role( $user_id );
+			} else {
+
+				// Canonical: a HivePress vendor profile linked to this user.
+				if ( function_exists( 'hivepress' ) && class_exists( '\HivePress\Models\Vendor' ) ) {
+					try {
+						$vendor_id = \HivePress\Models\Vendor::query()->filter(
+							[ 'user' => $user_id ]
+						)->get_first_id();
+						if ( $vendor_id ) {
+							$is_vendor = true;
+						}
+					} catch ( \Throwable $e ) {
+						$is_vendor = false;
+					}
+				}
+
+				// Fallback: the user has authored at least one listing. This is
+				// the half "Vendors only" switches off.
+				if ( ! $is_vendor && 'listings' === $audience ) {
+					$has_listings = get_posts(
+						[
+							'post_type'     => 'hp_listing',
+							'post_status'   => [ 'publish', 'pending', 'private', 'future', 'draft' ],
+							'author'        => $user_id,
+							'fields'        => 'ids',
+							'numberposts'   => 1,
+							'no_found_rows' => true,
+						]
+					);
+					if ( ! empty( $has_listings ) ) {
 						$is_vendor = true;
 					}
-				} catch ( \Throwable $e ) {
-					$is_vendor = false;
-				}
-			}
-
-			// Fallback: the user has authored at least one listing.
-			if ( ! $is_vendor ) {
-				$has_listings = get_posts(
-					[
-						'post_type'     => 'hp_listing',
-						'post_status'   => [ 'publish', 'pending', 'private', 'future', 'draft' ],
-						'author'        => $user_id,
-						'fields'        => 'ids',
-						'numberposts'   => 1,
-						'no_found_rows' => true,
-					]
-				);
-				if ( ! empty( $has_listings ) ) {
-					$is_vendor = true;
 				}
 			}
 
 			/**
 			 * Filters whether a user is treated as a vendor for holiday mode.
 			 *
+			 * Runs last, after the site owner's Who Can Use Holiday Mode choice
+			 * has been applied, so a site with its own idea of who counts still
+			 * has the final word in either direction.
+			 *
 			 * @param bool $is_vendor Whether the user is a vendor.
 			 * @param int  $user_id   The user ID.
 			 */
 			$is_vendor = (bool) apply_filters( 'holiday_mode_for_hivepress_is_vendor', $is_vendor, $user_id );
 
-			$this->vendor_cache[ $user_id ] = $is_vendor;
+			$this->vendor_cache[ $cache_key ] = $is_vendor;
 
 			return $is_vendor;
+		}
+
+		/* ---------------- Hide list ---------------- */
+
+		/**
+		 * Returns the statuses holiday mode hides on this site right now.
+		 *
+		 * Read by the hiding paths ONLY. bulk_restore() must never consult it;
+		 * see the comment there for the listings that would be lost if it did.
+		 *
+		 * An empty stored value means the full list, which covers both a site
+		 * that has never opened the setting and an owner who unticked every
+		 * box: holiday mode that hides nothing is a switch that does nothing,
+		 * and the field says so.
+		 *
+		 * @return array
+		 */
+		private function get_hideable_statuses() {
+			$statuses = get_option( self::HIDEABLE_OPTION );
+
+			if ( ! is_array( $statuses ) ) {
+				$statuses = [];
+			}
+
+			$statuses = array_values( array_intersect( self::HIDEABLE, array_map( 'strval', $statuses ) ) );
+
+			return $statuses ? $statuses : self::HIDEABLE;
+		}
+
+		/**
+		 * Whether a recorded previous status is one we are willing to put a
+		 * hidden listing back into.
+		 *
+		 * Deliberately not "is this status still on the hide list". The hide
+		 * list is the owner's current preference; this is a sanity check on a
+		 * value written months ago and read once, so it asks only whether the
+		 * status is real and whether restoring into it makes sense.
+		 *
+		 * @param mixed $status The status recorded when the listing was hidden.
+		 * @return bool
+		 */
+		private function is_restorable_status( $status ) {
+			$status = is_scalar( $status ) ? (string) $status : '';
+
+			if ( '' === $status || in_array( $status, self::NOT_RESTORABLE, true ) ) {
+				return false;
+			}
+
+			return (bool) get_post_status_object( $status );
 		}
 
 		/* ---------------- Bulk ops ---------------- */
@@ -1310,13 +1647,16 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		 * @return int How many listings were hidden.
 		 */
 		private function bulk_set_draft( $user_id ) {
-			$listing_ids = $this->get_vendor_listings( $user_id, self::HIDEABLE );
+			// The hiding path, and only the hiding path, follows the owner's
+			// current Statuses to Hide setting.
+			$hideable    = $this->get_hideable_statuses();
+			$listing_ids = $this->get_vendor_listings( $user_id, $hideable );
 			$hidden      = 0;
 
 			$this->suspend_enforce = true;
 			foreach ( $listing_ids as $listing_id ) {
 				$curr = get_post_status( $listing_id );
-				if ( ! in_array( $curr, self::HIDEABLE, true ) ) {
+				if ( ! in_array( $curr, $hideable, true ) ) {
 					continue;
 				}
 				update_post_meta( $listing_id, self::LISTING_META_PREV, $curr );
@@ -1343,7 +1683,18 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		 * @return array `restored` and `expired` counts.
 		 */
 		private function bulk_restore( $user_id ) {
-			$listing_ids = $this->get_vendor_listings( $user_id, 'any', true );
+			// Every registered status, spelled out: WP_Query's 'any' quietly
+			// skips statuses flagged exclude_from_search - 'trash' and
+			// 'auto-draft' among them - so a listing an admin trashed
+			// mid-holiday was invisible to this sweep and kept its marker.
+			// The promise below that the tracking meta is always cleared
+			// silently failed, and once an untrash later parked the post in
+			// draft (WordPress restores trashed posts to draft since 5.6),
+			// the vendor's NEXT holiday cycle republished admin-removed
+			// content from the stale marker. Seeing a listing here never
+			// republishes it by itself: the criteria in the loop still
+			// require its current status to be draft.
+			$listing_ids = $this->get_vendor_listings( $user_id, array_values( get_post_stati() ), true );
 
 			// Two extensions treat any transition to publish/pending as a brand
 			// new submission, so a restore would be billed as one. Stand both
@@ -1380,7 +1731,19 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				$prev = get_post_meta( $listing_id, self::LISTING_META_PREV, true );
 				$curr = get_post_status( $listing_id );
 
-				if ( 'draft' === $curr && in_array( $prev, self::HIDEABLE, true ) ) {
+				// Hiding asks the owner's current Statuses to Hide setting;
+				// restoring asks the listing. The two must never share one
+				// list. Were this test written against the hide list instead,
+				// an owner narrowing that setting while vendors were away
+				// would strand every listing whose recorded status had just
+				// been dropped from it: the restore would skip the listing,
+				// the marker would still be deleted at the foot of this loop,
+				// and the vendor would come back to listings hidden with
+				// nothing left on them saying what they used to be. The only
+				// safe thing to restore into is the status the listing
+				// actually had, so the test below is a sanity check on that
+				// recorded value, never a re-run of today's setting.
+				if ( 'draft' === $curr && $this->is_restorable_status( $prev ) ) {
 					// A listing whose own paid period ran out while it was hidden stays hidden,
 					// because holiday mode must never buy a listing extra time. Counted separately
 					// so the caller can say so: the behaviour is correct but completely invisible,
@@ -1470,18 +1833,40 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		/**
 		 * Decides whether a vendor may switch holiday mode off.
 		 *
-		 * Only a system that demonstrably governs THIS vendor gets a say. That
-		 * matters because no HivePress monetisation system hides listings when
-		 * entitlement lapses: Memberships only redirects the submit route and
-		 * drafts the membership post itself
-		 * (`memberships/includes/components/class-membership.php:872-917`), and
-		 * Paid Listings only blocks the submit flow. So a vendor outside every
-		 * system, or on a site that merely has one installed, must never be
-		 * blocked: their listings would still be visible had they never used
-		 * holiday mode at all, and blocking would eventually cost them the
-		 * listings entirely once the storage period trashes expired drafts.
+		 * Only a system that demonstrably governs THIS vendor gets a say.
+		 * Enrolment, not mere installation, is what confers jurisdiction: a
+		 * vendor outside every system, or on a site that merely has one
+		 * installed, must never be blocked, because their listings would still
+		 * be visible had they never used holiday mode at all, and blocking
+		 * would eventually cost them the listings entirely once the storage
+		 * period trashes expired drafts.
 		 *
-		 * Enrolment, not mere installation, is what confers jurisdiction.
+		 * Since 1.7.5 the WooCommerce Subscriptions check is retired.
+		 * `wcs_user_has_subscription()` is product-agnostic, so it could not
+		 * tell a subscription that governs listings from a lapsed newsletter
+		 * or coffee-box one, and a vendor who had once bought ANY subscription
+		 * and cancelled it was trapped on holiday for good. There is no
+		 * product-scoping option to consult, the way check_memberships() reads
+		 * `hp_membership_models`, so the check could not be scoped - only
+		 * retired.
+		 *
+		 * Since 1.7.6 the HivePress Memberships check is an opt-in setting
+		 * (HivePress > Settings > Holiday Mode > Restoring Listings) that
+		 * defaults to OFF, on upgrades as well as fresh installs. HivePress
+		 * never re-gates listings that are already published: Memberships'
+		 * expire_memberships() only emails the vendor and drafts or trashes
+		 * the membership post, and the submission limit is a route guard that
+		 * redirects someone submitting or renewing. Nothing anywhere hides or
+		 * re-checks a vendor's live listings once their entitlement lapses.
+		 * Refusing to end a holiday therefore protected no entitlement at all;
+		 * it only left a vendor who had used holiday mode worse off than an
+		 * identical vendor who never did. The gate stays available for an
+		 * owner who deliberately wants it, but it is no longer imposed.
+		 *
+		 * What else gates a restore: each listing's own expiry date (checked
+		 * per listing in bulk_restore, so a holiday never buys visible time),
+		 * and the entitlement filters below, for a site whose own code hides
+		 * listings on lapse and wants its own gate.
 		 *
 		 * @param int $user_id The user being evaluated.
 		 * @return array `allowed` (bool), `reason` (string) and `message` (string).
@@ -1504,30 +1889,22 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				return $this->filter_entitlement( $entitlement, $user_id );
 			}
 
-			foreach ( [ 'memberships', 'subscriptions' ] as $system ) {
-				$verdict = call_user_func( [ $this, 'check_' . $system ], $user_id );
+			// Opt-in since 1.7.6 (see above): with the box unticked the vendor
+			// is ungoverned, exactly as on a site carrying no membership
+			// system at all. Only the option is read here; check_memberships()
+			// still decides jurisdiction once it is asked.
+			if ( $this->membership_gate_enabled() ) {
+				$verdict = $this->check_memberships( $user_id );
 
-				if ( is_null( $verdict ) ) {
-					// This system does not govern the vendor: no opinion.
-					continue;
+				if ( ! is_null( $verdict ) ) {
+					if ( $verdict ) {
+						$entitlement['reason'] = 'memberships_active';
+					} else {
+						$entitlement['allowed'] = false;
+						$entitlement['reason']  = 'memberships_lapsed';
+						$entitlement['message'] = esc_html__( 'Your membership is not active, so holiday mode cannot be switched off yet and your listings stay hidden. Please renew your membership to restore them.', 'holiday-mode-for-hivepress' );
+					}
 				}
-
-				if ( $verdict ) {
-					$entitlement['reason'] = $system . '_active';
-
-					return $this->filter_entitlement( $entitlement, $user_id );
-				}
-
-				$entitlement['allowed'] = false;
-				$entitlement['reason']  = $system . '_lapsed';
-
-				if ( 'memberships' === $system ) {
-					$entitlement['message'] = esc_html__( 'Your membership is not active, so holiday mode cannot be switched off yet and your listings stay hidden. Please renew your membership to restore them.', 'holiday-mode-for-hivepress' );
-				} else {
-					$entitlement['message'] = esc_html__( 'Your subscription is not active, so holiday mode cannot be switched off yet and your listings stay hidden. Please renew your subscription to restore them.', 'holiday-mode-for-hivepress' );
-				}
-
-				break;
 			}
 
 			return $this->filter_entitlement( $entitlement, $user_id );
@@ -1545,7 +1922,7 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			 * Filters whether the user may restore (un-hide) their listings.
 			 *
 			 * Kept for backwards compatibility: it receives, and can override,
-			 * the decision the bundled entitlement checks reached.
+			 * the decision the bundled membership check reached.
 			 *
 			 * @param bool $has_access Whether the restore is currently allowed.
 			 * @param int  $user_id    The user being evaluated.
@@ -1574,23 +1951,49 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		}
 
 		/**
+		 * Whether the site owner has asked for the Memberships restore gate.
+		 *
+		 * Off by default, and deliberately never migrated on: an install
+		 * coming from 1.7.5 or earlier loses no entitlement by having it
+		 * switched off, because the gate protected none (see get_entitlement).
+		 *
+		 * @return bool
+		 */
+		private function membership_gate_enabled() {
+			return (bool) get_option( self::REQUIRE_MEMBERSHIP_OPTION );
+		}
+
+		/**
+		 * Whether HivePress Memberships is active AND set to restrict listings.
+		 *
+		 * Split out of check_memberships() so the settings-form description can
+		 * ask the same question without running a membership query for a vendor
+		 * who is only looking at the form.
+		 *
+		 * @return bool
+		 */
+		private function memberships_govern_listings() {
+			if ( ! function_exists( 'hivepress' ) || ! hivepress()->get_version( 'memberships' ) || ! class_exists( '\HivePress\Models\Membership' ) ) {
+				return false;
+			}
+
+			// Read at `memberships/includes/components/class-membership.php:46`.
+			return in_array( 'listing', (array) get_option( 'hp_membership_models', [ 'listing' ] ), true );
+		}
+
+		/**
 		 * HivePress Memberships verdict for a vendor.
 		 *
 		 * Governs only when listing restrictions are switched on for the site
-		 * (`hp_membership_models`, read at
-		 * `memberships/includes/components/class-membership.php:46`) and the
-		 * vendor holds a membership record. A membership post is `publish`
-		 * while active and `draft` once expired (`models/class-membership.php:31-45`).
+		 * and the vendor holds a membership record. A membership post is
+		 * `publish` while active and `draft` once expired
+		 * (`models/class-membership.php:31-45`).
 		 *
 		 * @param int $user_id The user being evaluated.
 		 * @return bool|null True if entitled, false if lapsed, null if not governed.
 		 */
 		private function check_memberships( $user_id ) {
-			if ( ! function_exists( 'hivepress' ) || ! hivepress()->get_version( 'memberships' ) || ! class_exists( '\HivePress\Models\Membership' ) ) {
-				return null;
-			}
-
-			if ( ! in_array( 'listing', (array) get_option( 'hp_membership_models', [ 'listing' ] ), true ) ) {
+			if ( ! $this->memberships_govern_listings() ) {
 				return null;
 			}
 
@@ -1619,28 +2022,6 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			} catch ( \Throwable $e ) {
 				return null;
 			}
-		}
-
-		/**
-		 * WooCommerce Subscriptions verdict for a vendor.
-		 *
-		 * Governs only a vendor who holds a subscription of some kind, so a site
-		 * that uses subscriptions for something unrelated (or has none yet)
-		 * never traps its vendors.
-		 *
-		 * @param int $user_id The user being evaluated.
-		 * @return bool|null True if entitled, false if lapsed, null if not governed.
-		 */
-		private function check_subscriptions( $user_id ) {
-			if ( ! function_exists( 'wcs_user_has_subscription' ) ) {
-				return null;
-			}
-
-			if ( wcs_user_has_subscription( $user_id, 0, 'active' ) ) {
-				return true;
-			}
-
-			return wcs_user_has_subscription( $user_id, 0, 'any' ) ? false : null;
 		}
 
 		/* ---------------- Banner ---------------- */

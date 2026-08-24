@@ -29,6 +29,25 @@ namespace HivePress\Models {
 			public function get_first_id() { return $GLOBALS['_vendor_first_id'] ?? 0; }
 		}
 	}
+
+	// HivePress Memberships. check_memberships() asks twice: once for a
+	// `publish` record (active) and once for `draft`/`pending` (lapsed), so the
+	// stub has to remember which filter it was handed.
+	if ( getenv( 'HM_MEMBERSHIPS' ) !== 'absent' ) {
+		class Membership {
+			private $wants_lapsed = false;
+			public static function query() { return new self(); }
+			public function filter( $a ) {
+				$this->wants_lapsed = isset( $a['status__in'] );
+				return $this;
+			}
+			public function get_first_id() {
+				return $this->wants_lapsed
+					? ( $GLOBALS['_mem_draft_id'] ?? 0 )
+					: ( $GLOBALS['_mem_publish_id'] ?? 0 );
+			}
+		}
+	}
 }
 
 namespace HivePress\Fields {
@@ -43,8 +62,10 @@ namespace {
 
 	function reset_globals() {
 		$GLOBALS['_usermeta'] = []; $GLOBALS['_users'] = []; $GLOBALS['_can'] = [];
+		$GLOBALS['_roles'] = [ 'administrator' => 'Administrator', 'contributor' => 'Contributor', 'hp_vendor' => 'Vendor' ];
 		$GLOBALS['_current_user_id'] = 0; $GLOBALS['_posts'] = []; $GLOBALS['_vendor_first_id'] = 0;
 		$GLOBALS['_wcs_active'] = false; $GLOBALS['_wcs_has_any'] = false; $GLOBALS['_router_url'] = '';
+		$GLOBALS['_mem_ext'] = false; $GLOBALS['_mem_publish_id'] = 0; $GLOBALS['_mem_draft_id'] = 0;
 		$GLOBALS['_cascade_instance'] = null; $GLOBALS['_cascade_depth'] = 0;
 		$GLOBALS['_is_admin'] = false; $GLOBALS['_badge_actions'] = [];
 		$GLOBALS['_user_caps'] = []; $GLOBALS['_options'] = [];
@@ -93,6 +114,10 @@ namespace {
 		if ( 'hivepress/v1/models/listing/update_status' === $tag ) { $GLOBALS['_badge_actions'][] = 'remove'; }
 		return true;
 	}
+	// Records every fired action so tests can assert on the public hooks.
+	function do_action( $tag ) {
+		$GLOBALS['_did_actions'][] = [ 'tag' => $tag, 'args' => array_slice( func_get_args(), 1 ) ];
+	}
 	function apply_filters( $tag, $value ) {
 		$extra = array_slice( func_get_args(), 2 );
 		if ( empty( $GLOBALS['_filters'][ $tag ] ) ) { return $value; }
@@ -110,6 +135,11 @@ namespace {
 	function current_user_can( $c ) { return ! empty( $GLOBALS['_can'][ $c ] ); }
 	function user_can( $uid, $c ) { return ! empty( $GLOBALS['_user_caps'][ $uid ][ $c ] ); }
 	function get_user_by( $f, $id ) { return isset( $GLOBALS['_users'][ $id ] ) ? (object) $GLOBALS['_users'][ $id ] : false; }
+	// WP_User exposes ->roles as a plain slug array; the role-based audience
+	// added in 1.7.6 reads nothing else off the user object.
+	function get_userdata( $id ) { return isset( $GLOBALS['_users'][ $id ] ) ? (object) $GLOBALS['_users'][ $id ] : false; }
+	function wp_roles() { return new class { public function get_names() { return $GLOBALS['_roles']; } }; }
+	function translate_user_role( $n ) { return $n; }
 	function get_user_meta( $uid, $k, $s = false ) { return $GLOBALS['_usermeta'][ $uid ][ $k ] ?? ''; }
 	function update_user_meta( $uid, $k, $v ) { $GLOBALS['_usermeta'][ $uid ][ $k ] = $v; return true; }
 	function delete_user_meta( $uid, $k ) { unset( $GLOBALS['_usermeta'][ $uid ][ $k ] ); return true; }
@@ -121,6 +151,20 @@ namespace {
 	function wp_cache_delete( $id, $g = '' ) { $GLOBALS['_cache_deleted'][] = $id; return true; }
 
 	function get_post_status( $id ) { return isset( $GLOBALS['_posts'][ $id ] ) ? $GLOBALS['_posts'][ $id ]['status'] : false; }
+	// Core's real list, so bulk_restore's "every status including trash" sweep
+	// (the 1.7.5 stale-marker fix) can be driven by the harness.
+	function get_post_stati( $args = [], $output = 'names' ) {
+		return [
+			'publish' => 'publish',
+			'future'  => 'future',
+			'draft'   => 'draft',
+			'pending' => 'pending',
+			'private' => 'private',
+			'trash'   => 'trash',
+			'auto-draft' => 'auto-draft',
+			'inherit' => 'inherit',
+		];
+	}
 	function get_post( $id ) {
 		if ( ! isset( $GLOBALS['_posts'][ $id ] ) ) { return null; }
 		return (object) [ 'ID' => $id, 'post_author' => $GLOBALS['_posts'][ $id ]['author'] ];
@@ -225,6 +269,7 @@ namespace {
 			public function get_version( $ext ) {
 				if ( 'badges' === $ext ) { return getenv( 'HM_BADGES' ) === '1' ? '1.0.0' : null; }
 				if ( 'messages' === $ext ) { return getenv( 'HM_MESSAGES' ) === '1' ? '1.0.0' : null; }
+				if ( 'memberships' === $ext ) { return empty( $GLOBALS['_mem_ext'] ) ? null : '1.0.0'; }
 				return null;
 			}
 		};
@@ -252,6 +297,10 @@ namespace {
 	function get_priv( $i, $p ) { $x = new ReflectionProperty( $i, $p ); $x->setAccessible( true ); return $x->getValue( $i ); }
 	function call_priv( $i, $m, $a = [] ) { $x = new ReflectionMethod( $i, $m ); $x->setAccessible( true ); return $x->invokeArgs( $i, $a ); }
 	function add_post( $id, $au, $st, $meta = [] ) { $GLOBALS['_posts'][ $id ] = [ 'author' => $au, 'status' => $st, 'meta' => $meta ]; }
+	// The Memberships restore gate is an opt-in setting since 1.7.6, so every
+	// test that exercises it has to tick the box first. reset_state() clears
+	// $GLOBALS['_options'], so this belongs AFTER the reset, never before it.
+	function require_membership() { $GLOBALS['_options']['hp_holiday_mode_for_hivepress_require_membership'] = 1; }
 	function settings_form( $val, $uid = 10, $cls = 'HivePress\Forms\User_Update' ) {
 		$f = new $cls();
 		$f->fields = [ 'holiday_mode_for_hivepress' => [ 'type' => 'checkbox' ] ];
@@ -262,6 +311,7 @@ namespace {
 
 	$WCS = getenv( 'HM_WCS' ) !== 'absent';
 	$VEN = getenv( 'HM_VENDOR' ) !== 'absent';
+	$MEM = getenv( 'HM_MEMBERSHIPS' ) !== 'absent';
 	$BDG = getenv( 'HM_BADGES' ) === '1';
 	$MSG = getenv( 'HM_MESSAGES' ) === '1';
 	echo '=== Holiday Mode QA (WCS ' . ( $WCS ? 'on' : 'ABSENT' ) . ', Vendor ' . ( $VEN ? 'on' : 'ABSENT' ) .
@@ -269,15 +319,21 @@ namespace {
 
 	/* ===================== A. entitlement ===================== */
 	echo "\n[A] get_entitlement\n";
+	// Subscriptions no longer govern at all (1.7.5): wcs_user_has_subscription()
+	// is product-agnostic, so a lapsed newsletter subscription used to trap a
+	// vendor on holiday for good. Memberships CAN still govern, but only where
+	// the owner ticked the 1.7.6 opt-in AND hp_membership_models covers
+	// listings: HivePress never re-gates listings that are already published,
+	// so an imposed gate protected nothing and only left the vendor who used
+	// holiday mode worse off than one who never did.
 	if ( $WCS ) {
 		reset_state(); $GLOBALS['_wcs_has_any'] = true; $GLOBALS['_wcs_active'] = true;
 		$e = $INST->get_entitlement( 8 );
-		ok( true === $e['allowed'] && 'subscriptions_active' === $e['reason'], 'A1 active subscription -> allowed' );
+		ok( true === $e['allowed'] && 'ungoverned' === $e['reason'], 'A1 active subscription is no longer consulted [1.7.5]' );
 
 		reset_state(); $GLOBALS['_wcs_has_any'] = true; $GLOBALS['_wcs_active'] = false;
 		$e = $INST->get_entitlement( 9 );
-		ok( false === $e['allowed'] && 'subscriptions_lapsed' === $e['reason'], 'A2 lapsed subscription -> blocked' );
-		ok( stripos( $e['message'], 'subscription' ) !== false, 'A3 message names the subscription' );
+		ok( true === $e['allowed'] && 'ungoverned' === $e['reason'], 'A2 lapsed subscription no longer traps the vendor [1.7.5]' );
 
 		reset_state(); $GLOBALS['_wcs_has_any'] = false;
 		$e = $INST->get_entitlement( 10 );
@@ -292,6 +348,73 @@ namespace {
 		ok( true === $e['allowed'] && 'ungoverned' === $e['reason'], 'A6 no subscription system -> ungoverned' );
 	}
 
+	/* --- Memberships gate, restored in 1.7.5 after being over-retired --- */
+
+	// Gate ticked ON but the extension is absent entirely: the option on its
+	// own must never govern anybody.
+	reset_state(); require_membership(); $GLOBALS['_mem_publish_id'] = 55;
+	$e = $INST->get_entitlement( 20 );
+	ok( true === $e['allowed'] && 'ungoverned' === $e['reason'], 'A9 gate ON but Memberships inactive -> ungoverned [1.7.6]' );
+
+	// Gate ticked ON and the extension active, but listing restrictions
+	// switched OFF for the site.
+	reset_state(); require_membership(); $GLOBALS['_mem_ext'] = true;
+	$GLOBALS['_options']['hp_membership_models'] = [ 'vendor' ];
+	$GLOBALS['_mem_draft_id'] = 77;
+	$e = $INST->get_entitlement( 21 );
+	ok( true === $e['allowed'] && 'ungoverned' === $e['reason'], 'A10 listings not restricted -> ungoverned even with a lapsed membership' );
+
+	if ( $MEM ) {
+		// GATE OFF, which is the default and what an install upgrading from
+		// 1.7.5 gets. Everything that would govern is present and the
+		// membership has lapsed, and the vendor must STILL be waved through:
+		// HivePress leaves their already published listings visible on lapse,
+		// so refusing here would only punish them for having used the feature.
+		reset_state(); $GLOBALS['_mem_ext'] = true; $GLOBALS['_mem_draft_id'] = 77;
+		$e = $INST->get_entitlement( 26 );
+		ok( true === $e['allowed'] && 'ungoverned' === $e['reason'], 'A9b gate OFF by default -> lapsed member allowed [1.7.6]' );
+		ok( '' === $e['message'], 'A9c gate OFF -> no renew-your-membership message [1.7.6]' );
+
+		// GATE OFF with an ACTIVE membership: not consulted either, so the
+		// reason stays 'ungoverned' rather than 'memberships_active'.
+		reset_state(); $GLOBALS['_mem_ext'] = true; $GLOBALS['_mem_publish_id'] = 55;
+		$e = $INST->get_entitlement( 27 );
+		ok( true === $e['allowed'] && 'ungoverned' === $e['reason'], 'A9d gate OFF -> membership not consulted at all [1.7.6]' );
+
+		// GATE ON, governed and active.
+		reset_state(); require_membership(); $GLOBALS['_mem_ext'] = true; $GLOBALS['_mem_publish_id'] = 55;
+		$e = $INST->get_entitlement( 22 );
+		ok( true === $e['allowed'] && 'memberships_active' === $e['reason'], 'A11 gate ON, active membership -> allowed' );
+
+		// GATE ON, governed and lapsed: the 1.5.0 behaviour, now opt-in.
+		reset_state(); require_membership(); $GLOBALS['_mem_ext'] = true; $GLOBALS['_mem_draft_id'] = 77;
+		$e = $INST->get_entitlement( 23 );
+		ok( false === $e['allowed'] && 'memberships_lapsed' === $e['reason'], 'A12 gate ON, lapsed membership -> blocked [1.7.6]' );
+		ok( stripos( $e['message'], 'membership' ) !== false, 'A13 message names the membership' );
+
+		// Never held one: enrolment, not installation, confers jurisdiction.
+		reset_state(); require_membership(); $GLOBALS['_mem_ext'] = true;
+		$e = $INST->get_entitlement( 24 );
+		ok( true === $e['allowed'] && 'ungoverned' === $e['reason'], 'A14 never enrolled -> allowed' );
+
+		// Admin bypass must win over a lapsed membership.
+		reset_state(); require_membership(); $GLOBALS['_mem_ext'] = true; $GLOBALS['_mem_draft_id'] = 77;
+		$GLOBALS['_user_caps'][7] = [ 'edit_others_posts' => true ];
+		$e = $INST->get_entitlement( 7 );
+		ok( true === $e['allowed'] && 'bypass' === $e['reason'], 'A15 edit_others_posts beats a lapsed membership' );
+	} else {
+		// Memberships not installed: the class-exists guard must keep the whole
+		// gate out of the way rather than fatalling on a missing model, whether
+		// or not the owner ticked the option on.
+		reset_state(); $GLOBALS['_mem_ext'] = true; $GLOBALS['_mem_draft_id'] = 77;
+		$e = $INST->get_entitlement( 25 );
+		ok( true === $e['allowed'] && 'ungoverned' === $e['reason'], 'A11b Memberships model absent -> ungoverned, no fatal' );
+
+		reset_state(); require_membership(); $GLOBALS['_mem_ext'] = true; $GLOBALS['_mem_draft_id'] = 77;
+		$e = $INST->get_entitlement( 28 );
+		ok( true === $e['allowed'] && 'ungoverned' === $e['reason'], 'A11c option ON has no effect with Memberships absent [1.7.6]' );
+	}
+
 	reset_state();
 	$GLOBALS['_filters']['holiday_mode_for_hivepress_has_active_membership'] = [ [ 'cb' => function ( $a ) { return false; }, 'prio' => 10, 'args' => 1 ] ];
 	$e = $INST->get_entitlement( 11 );
@@ -304,13 +427,16 @@ namespace {
 	ok( false === $e['allowed'] && 'Nope' === $e['message'], 'A8 entitlement filter plugs in another system' );
 	unset( $GLOBALS['_filters']['holiday_mode_for_hivepress_entitlement'] );
 
-	if ( $WCS ) {
-		reset_state(); $GLOBALS['_wcs_has_any'] = true; $GLOBALS['_wcs_active'] = false;
+	// Gate refusal is now driven by a lapsed MEMBERSHIP rather than a lapsed
+	// subscription, but the property under test is unchanged since 1.5.0:
+	// apply_toggle re-checks entitlement, so a queued switch-off cannot restore.
+	if ( $MEM ) {
+		reset_state(); require_membership(); $GLOBALS['_mem_ext'] = true; $GLOBALS['_mem_draft_id'] = 77;
 		add_post( 900, 10, 'draft', [ '_holiday_mode_for_hivepress_prev_status' => 'publish' ] );
 		$GLOBALS['_usermeta'][10]['_holiday_mode_for_hivepress'] = true;
 		set_priv( $INST, 'pending_toggle', [ 'user_id' => 10, 'enable' => false ] );
 		$INST->apply_toggle( 10 );
-		ok( 'draft' === get_post_status( 900 ), 'A9 apply_toggle re-checks gate; stale intent cannot restore [1.5.0]' );
+		ok( 'draft' === get_post_status( 900 ), 'A16 apply_toggle re-checks gate; stale intent cannot restore [1.5.0]' );
 	}
 
 	if ( $WCS && $VEN ) {
@@ -342,6 +468,32 @@ namespace {
 		ok( isset( $out['fields']['holiday_mode_for_hivepress_headline'] ) && isset( $out['fields']['holiday_mode_for_hivepress_message'] ),
 			'B7 vendor message fields appear when Vendor Messages is on [1.7.0]' );
 
+		// 1.7.6: the vendor-facing sentence promises a membership check, so it
+		// may only appear where one will actually run. Promising a check the
+		// plugin will not perform misleads every vendor on the site, which is
+		// the trap the pre-1.3.1 wording fell into.
+		$promise = 'membership is active at that time';
+
+		reset_state(); $GLOBALS['_current_user_id'] = 10; $GLOBALS['_vendor_first_id'] = 55;
+		$GLOBALS['_mem_ext'] = true;
+		$out = $INST->extend_settings_form( [ 'fields' => [] ], new HivePress\Forms\User_Update() );
+		ok( false === strpos( $out['fields']['holiday_mode_for_hivepress']['description'], $promise ),
+			'B8 gate off -> the vendor is promised no membership check [1.7.6]' );
+
+		if ( $MEM ) {
+			reset_state(); require_membership(); $GLOBALS['_current_user_id'] = 10; $GLOBALS['_vendor_first_id'] = 55;
+			$GLOBALS['_mem_ext'] = true;
+			$out = $INST->extend_settings_form( [ 'fields' => [] ], new HivePress\Forms\User_Update() );
+			ok( false !== strpos( $out['fields']['holiday_mode_for_hivepress']['description'], $promise ),
+				'B9 gate on + Memberships governing -> the promise is shown [1.7.6]' );
+		}
+
+		reset_state(); require_membership(); $GLOBALS['_current_user_id'] = 10; $GLOBALS['_vendor_first_id'] = 55;
+		$GLOBALS['_mem_ext'] = true; $GLOBALS['_options']['hp_membership_models'] = [ 'vendor' ];
+		$out = $INST->extend_settings_form( [ 'fields' => [] ], new HivePress\Forms\User_Update() );
+		ok( false === strpos( $out['fields']['holiday_mode_for_hivepress']['description'], $promise ),
+			'B10 gate on but restrictions do not cover listings -> no promise [1.7.6]' );
+
 		/* ===================== C. validate_toggle ===================== */
 		echo "\n[C] validate_toggle\n";
 		reset_state(); $GLOBALS['_current_user_id'] = 10; $GLOBALS['_vendor_first_id'] = 55;
@@ -364,12 +516,23 @@ namespace {
 		reset_state(); $GLOBALS['_current_user_id'] = 1; $GLOBALS['_can']['manage_options'] = true;
 		ok( $INST->validate_toggle( [], settings_form( true, 99 ) ) === [] && null === get_priv( $INST, 'pending_toggle' ), 'C4 admin editing another user -> ignored' );
 
-		reset_state(); $GLOBALS['_current_user_id'] = 10; $GLOBALS['_vendor_first_id'] = 55;
-		$GLOBALS['_wcs_has_any'] = true; $GLOBALS['_wcs_active'] = false;
-		$GLOBALS['_usermeta'][10]['_holiday_mode_for_hivepress'] = true;
-		$e = $INST->validate_toggle( [], settings_form( null ) );
-		ok( count( $e ) === 1 && null === get_priv( $INST, 'pending_toggle' ), 'C5 lapsed sub -> switch-off refused' );
-		ok( true === get_user_meta( 10, '_holiday_mode_for_hivepress', true ), 'C6 flag stays ON after refusal' );
+		if ( $MEM ) {
+			reset_state(); require_membership(); $GLOBALS['_current_user_id'] = 10; $GLOBALS['_vendor_first_id'] = 55;
+			$GLOBALS['_mem_ext'] = true; $GLOBALS['_mem_draft_id'] = 77;
+			$GLOBALS['_usermeta'][10]['_holiday_mode_for_hivepress'] = true;
+			$e = $INST->validate_toggle( [], settings_form( null ) );
+			ok( count( $e ) === 1 && null === get_priv( $INST, 'pending_toggle' ), 'C5 gate ON, lapsed membership -> switch-off refused' );
+			ok( true === get_user_meta( 10, '_holiday_mode_for_hivepress', true ), 'C6 flag stays ON after refusal' );
+
+			// Same vendor, same lapsed membership, gate left at its default:
+			// the switch-off must go straight through.
+			reset_state(); $GLOBALS['_current_user_id'] = 10; $GLOBALS['_vendor_first_id'] = 55;
+			$GLOBALS['_mem_ext'] = true; $GLOBALS['_mem_draft_id'] = 77;
+			$GLOBALS['_usermeta'][10]['_holiday_mode_for_hivepress'] = true;
+			$e  = $INST->validate_toggle( [], settings_form( null ) );
+			$pt = get_priv( $INST, 'pending_toggle' );
+			ok( $e === [] && $pt && false === $pt['enable'], 'C6b gate OFF, lapsed membership -> switch-off accepted [1.7.6]' );
+		}
 
 		/* ===================== D. apply_toggle ===================== */
 		echo "\n[D] apply_toggle\n";
@@ -571,10 +734,15 @@ namespace {
 	ok( isset( $tab['sections']['holiday_mode_for_hivepress_removal'] ), 'K3 removal section present' );
 	ok( isset( $tab['sections']['holiday_mode_for_hivepress_banner'] ), 'K4 banner section present [1.7.0]' );
 	ok( isset( $tab['sections']['holiday_mode_for_hivepress_notice'] ), 'K5 profile notice section present [1.7.0]' );
+	$gate = $tab['sections']['holiday_mode_for_hivepress_restore']['fields']['holiday_mode_for_hivepress_require_membership'] ?? null;
+	// No 'default' key: HivePress writes config defaults into the database, so
+	// a default of true would switch the gate on for everybody at first save.
+	ok( is_array( $gate ) && 'checkbox' === $gate['type'] && ! array_key_exists( 'default', $gate ), 'K5b restore gate is an opt-in checkbox with no default [1.7.6]' );
 	$icon = $tab['sections']['holiday_mode_for_hivepress_notice']['fields']['holiday_mode_for_hivepress_notice_icon'] ?? null;
 	ok( is_array( $icon ) && 'select' === $icon['type'] && 'icons' === $icon['options'], 'K6 icon field uses HivePress icon list [1.7.0]' );
 	$ref = new ReflectionClass( $INST );
 	ok( 'hp_holiday_mode_for_hivepress_delete_data' === $ref->getConstant( 'DELETE_DATA_OPTION' ), 'K7 option constant matches hp\prefix()' );
+	ok( 'hp_holiday_mode_for_hivepress_require_membership' === $ref->getConstant( 'REQUIRE_MEMBERSHIP_OPTION' ), 'K7b gate constant matches its hp\prefix()ed field key [1.7.6]' );
 	$keep = $INST->add_settings( [ 'listings' => [ 'title' => 'Listings' ] ] );
 	ok( isset( $keep['listings'] ) && isset( $keep['holiday_mode'] ), 'K8 preserves core tabs' );
 
@@ -705,6 +873,195 @@ namespace {
 		ok( false === strpos( $html, 'javascript' ), 'L22 malformed background from the filter is rejected [1.7.1]' );
 		unset( $GLOBALS['_filters']['holiday_mode_for_hivepress_vendor_notice'] );
 	}
+
+	/* ===================== M. audience + hide list (1.7.6) ===================== */
+	echo "\n[M] who can use holiday mode, and what gets hidden\n";
+
+	// --- the two new fields, and the reason neither carries a 'default' ---
+	reset_state();
+	$s      = $INST->add_settings( [] );
+	$tab    = $s['holiday_mode'];
+	$aud    = $tab['sections']['holiday_mode_for_hivepress_access']['fields']['holiday_mode_for_hivepress_audience'] ?? null;
+	$aud_rl = $tab['sections']['holiday_mode_for_hivepress_access']['fields']['holiday_mode_for_hivepress_audience_roles'] ?? null;
+	$hide   = $tab['sections']['holiday_mode_for_hivepress_hiding']['fields']['holiday_mode_for_hivepress_hideable_statuses'] ?? null;
+
+	ok( is_array( $aud ) && 'select' === $aud['type'] && ! array_key_exists( 'default', $aud ), 'M1 audience is a select with no default [1.7.6]' );
+	// The blank option must be named. Core prepends its own '&mdash;' placeholder
+	// when the options array has no '' key, which would print an em-dash and make
+	// the shipping behaviour read as "nothing chosen".
+	ok( isset( $aud['options'][''] ) && '' !== trim( (string) $aud['options'][''] )
+		&& false === strpos( (string) $aud['options'][''], "\u{2014}" ), 'M2 the default choice is a named option, not an em-dash placeholder [1.7.6]' );
+	ok( isset( $aud['options']['vendors'], $aud['options']['roles'] ) && 3 === count( $aud['options'] ), 'M3 exactly three choices offered [1.7.6]' );
+	ok( is_array( $aud_rl ) && 'checkboxes' === $aud_rl['type'] && ! array_key_exists( 'default', $aud_rl )
+		&& isset( $aud_rl['options']['contributor'] ), 'M4 companion role list built from the site roles, no default [1.7.6]' );
+	// Truthiness-only dependent fields (common.js) would show the role list for
+	// "Vendors only" too, so it is deliberately absent. If HivePress ever gains
+	// value matching, this is the assertion to revisit.
+	ok( ! array_key_exists( '_parent', $aud_rl ), 'M5 role list does not use _parent, which cannot express a three-way select [1.7.6]' );
+	ok( is_array( $hide ) && 'checkboxes' === $hide['type'] && ! array_key_exists( 'default', $hide )
+		&& [ 'publish', 'pending', 'private', 'future' ] === array_keys( $hide['options'] ), 'M6 hide list offers all four statuses with no default [1.7.6]' );
+
+	$ref = new ReflectionClass( $INST );
+	ok( 'hp_holiday_mode_for_hivepress_audience' === $ref->getConstant( 'AUDIENCE_OPTION' )
+		&& 'hp_holiday_mode_for_hivepress_audience_roles' === $ref->getConstant( 'AUDIENCE_ROLES_OPTION' )
+		&& 'hp_holiday_mode_for_hivepress_hideable_statuses' === $ref->getConstant( 'HIDEABLE_OPTION' ), 'M7 new option constants match their hp\prefix()ed field keys [1.7.6]' );
+
+	// --- defaults behave exactly as 1.7.5 did ---
+	reset_state(); add_post( 800, 10, 'publish' );
+	ok( 'listings' === call_priv( $INST, 'get_audience' ), 'M8 unset option reads as the old behaviour [1.7.6]' );
+	ok( true === call_priv( $INST, 'is_user_vendor', [ 10 ] ), 'M9 default: listing author still counts [1.7.6]' );
+	reset_state();
+	ok( [ 'publish', 'pending', 'private', 'future' ] === call_priv( $INST, 'get_hideable_statuses' ), 'M10 unset hide list reads as all four [1.7.6]' );
+
+	// --- vendors only ---
+	reset_state(); add_post( 801, 12, 'publish' );
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_audience'] = 'vendors';
+	ok( false === call_priv( $INST, 'is_user_vendor', [ 12 ] ), 'M11 vendors only: a listing author with no vendor profile is excluded [1.7.6]' );
+	if ( $VEN ) {
+		reset_state(); $GLOBALS['_vendor_first_id'] = 91;
+		$GLOBALS['_options']['hp_holiday_mode_for_hivepress_audience'] = 'vendors';
+		ok( true === call_priv( $INST, 'is_user_vendor', [ 12 ] ), 'M12 vendors only: a real vendor profile still counts [1.7.6]' );
+	}
+
+	// --- chosen roles ---
+	reset_state(); add_post( 802, 13, 'publish' ); $GLOBALS['_vendor_first_id'] = 91;
+	$GLOBALS['_users'][13] = [ 'ID' => 13, 'roles' => [ 'contributor' ] ];
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_audience']       = 'roles';
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_audience_roles'] = [ 'contributor' ];
+	ok( true === call_priv( $INST, 'is_user_vendor', [ 13 ] ), 'M13 chosen roles: a ticked role counts [1.7.6]' );
+
+	reset_state(); add_post( 803, 14, 'publish' ); $GLOBALS['_vendor_first_id'] = 91;
+	$GLOBALS['_users'][14] = [ 'ID' => 14, 'roles' => [ 'subscriber' ] ];
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_audience']       = 'roles';
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_audience_roles'] = [ 'contributor' ];
+	ok( false === call_priv( $INST, 'is_user_vendor', [ 14 ] ), 'M14 chosen roles: an unticked role does not count, listings and vendor profile ignored [1.7.6]' );
+
+	reset_state(); $GLOBALS['_users'][15] = [ 'ID' => 15, 'roles' => [ 'contributor' ] ];
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_audience'] = 'roles';
+	ok( false === call_priv( $INST, 'is_user_vendor', [ 15 ] ), 'M15 chosen roles with nothing ticked offers the switch to nobody [1.7.6]' );
+
+	// --- the memoised cache must not answer for the wrong setting ---
+	// Settings are saved and capabilities re-checked inside one request, so a
+	// verdict reached under the old setting must not survive the save.
+	reset_state(); add_post( 804, 16, 'publish' );
+	ok( true === call_priv( $INST, 'is_user_vendor', [ 16 ] ), 'M16 cache warmed under the default [1.7.6]' );
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_audience'] = 'vendors';
+	ok( false === call_priv( $INST, 'is_user_vendor', [ 16 ] ), 'M17 same user, same request, narrowed setting -> not served from cache [1.7.6]' );
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_audience']       = 'roles';
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_audience_roles'] = [ 'contributor' ];
+	$GLOBALS['_users'][16] = [ 'ID' => 16, 'roles' => [ 'contributor' ] ];
+	ok( true === call_priv( $INST, 'is_user_vendor', [ 16 ] ), 'M18 and again when the roles list changes [1.7.6]' );
+
+	// --- the public filter still has the last word, under every setting ---
+	reset_state(); add_post( 805, 17, 'publish' );
+	$GLOBALS['_filters']['holiday_mode_for_hivepress_is_vendor'] = [ [ 'cb' => function ( $v ) { return false; }, 'prio' => 10, 'args' => 1 ] ];
+	ok( false === call_priv( $INST, 'is_user_vendor', [ 17 ] ), 'M19 is_vendor filter still overrides a yes [1.7.6]' );
+	unset( $GLOBALS['_filters']['holiday_mode_for_hivepress_is_vendor'] );
+
+	reset_state();
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_audience'] = 'vendors';
+	$GLOBALS['_filters']['holiday_mode_for_hivepress_is_vendor'] = [ [ 'cb' => function ( $v ) { return true; }, 'prio' => 10, 'args' => 1 ] ];
+	ok( true === call_priv( $INST, 'is_user_vendor', [ 18 ] ), 'M20 is_vendor filter still overrides a no, even under "vendors only" [1.7.6]' );
+	unset( $GLOBALS['_filters']['holiday_mode_for_hivepress_is_vendor'] );
+
+	// --- a narrowed hide list hides fewer statuses ---
+	reset_state();
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_hideable_statuses'] = [ 'publish' ];
+	add_post( 810, 10, 'publish' ); add_post( 811, 10, 'pending' );
+	add_post( 812, 10, 'private' ); add_post( 813, 10, 'future' );
+	set_priv( $INST, 'pending_toggle', [ 'user_id' => 10, 'enable' => true ] );
+	$INST->apply_toggle( 10 );
+	ok( 'draft' === get_post_status( 810 ), 'M21 narrowed list still hides the ticked status [1.7.6]' );
+	ok( 'pending' === get_post_status( 811 ) && 'private' === get_post_status( 812 ) && 'future' === get_post_status( 813 ), 'M22 narrowed list leaves the unticked statuses alone [1.7.6]' );
+	ok( '' === get_post_meta( 811, '_holiday_mode_for_hivepress_prev_status', true ), 'M23 an untouched listing gets no marker [1.7.6]' );
+
+	// Enforcement follows the same narrowed list.
+	reset_state();
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_hideable_statuses'] = [ 'publish' ];
+	$GLOBALS['_usermeta'][10]['_holiday_mode_for_hivepress'] = true;
+	add_post( 820, 10, 'pending' ); $INST->enforce_draft_while_holiday( 820 );
+	ok( 'pending' === get_post_status( 820 ), 'M24 mid-holiday enforcement respects the narrowed list [1.7.6]' );
+	add_post( 821, 10, 'publish' ); $INST->enforce_draft_while_holiday( 821 );
+	ok( 'draft' === get_post_status( 821 ), 'M25 and still hides what is ticked [1.7.6]' );
+
+	// Unticking everything means all four, not nothing.
+	reset_state();
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_hideable_statuses'] = [];
+	ok( [ 'publish', 'pending', 'private', 'future' ] === call_priv( $INST, 'get_hideable_statuses' ), 'M26 an empty hide list reads as all four, never as "hide nothing" [1.7.6]' );
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_hideable_statuses'] = [ 'publish', 'nonsense', 'trash' ];
+	ok( [ 'publish' ] === call_priv( $INST, 'get_hideable_statuses' ), 'M27 junk in the stored list is dropped, not hidden on [1.7.6]' );
+
+	// --- THE STRANDING CASE ---
+	// A vendor goes on holiday while all four statuses are ticked, the owner
+	// then narrows the setting, and the vendor comes back. Every listing must
+	// still be restored: the recorded status is what the listing had, and
+	// bulk_restore() clears the marker whether it restores or not, so a listing
+	// skipped here would be hidden for good with nothing left saying what it
+	// used to be.
+	reset_state();
+	add_post( 830, 10, 'publish' ); add_post( 831, 10, 'pending' );
+	add_post( 832, 10, 'private' ); add_post( 833, 10, 'future' );
+	set_priv( $INST, 'pending_toggle', [ 'user_id' => 10, 'enable' => true ] );
+	$INST->apply_toggle( 10 );
+	ok( 'draft' === get_post_status( 830 ) && 'draft' === get_post_status( 831 )
+		&& 'draft' === get_post_status( 832 ) && 'draft' === get_post_status( 833 ), 'M28 all four hidden while the list was wide [1.7.6]' );
+
+	// The owner narrows the setting to publish only, mid-holiday.
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_hideable_statuses'] = [ 'publish' ];
+
+	set_priv( $INST, 'pending_toggle', [ 'user_id' => 10, 'enable' => false ] );
+	$INST->apply_toggle( 10 );
+	ok( 'publish' === get_post_status( 830 ), 'M29 stranding: publish restored after the list was narrowed [1.7.6]' );
+	ok( 'pending' === get_post_status( 831 ) && 'private' === get_post_status( 832 ) && 'future' === get_post_status( 833 ),
+		'M30 stranding: pending, private and future restored too, though the setting no longer lists them [1.7.6]' );
+	// The marker is cleared whether or not the listing was restored, which is
+	// what makes stranding permanent rather than merely delayed: assert the
+	// pair, so a regression cannot pass this by clearing markers on listings
+	// it never brought back.
+	ok( '' === get_post_meta( 831, '_holiday_mode_for_hivepress_prev_status', true ) && 'pending' === get_post_status( 831 ),
+		'M31 stranding: no listing loses its marker without first coming back [1.7.6]' );
+
+	// The restore-side check is a sanity check on the recorded value, not a
+	// re-run of the hide list: junk must not be acted on.
+	reset_state();
+	add_post( 840, 10, 'draft', [ '_holiday_mode_for_hivepress_prev_status' => 'nonsense' ] );
+	add_post( 841, 10, 'draft', [ '_holiday_mode_for_hivepress_prev_status' => 'trash' ] );
+	add_post( 842, 10, 'draft', [ '_holiday_mode_for_hivepress_prev_status' => 'private' ] );
+	$GLOBALS['_usermeta'][10]['_holiday_mode_for_hivepress'] = true;
+	set_priv( $INST, 'pending_toggle', [ 'user_id' => 10, 'enable' => false ] );
+	$INST->apply_toggle( 10 );
+	ok( 'draft' === get_post_status( 840 ) && 'draft' === get_post_status( 841 ), 'M32 an unreal or non-restorable recorded status is not acted on [1.7.6]' );
+	ok( 'private' === get_post_status( 842 ), 'M33 a real recorded status still restores [1.7.6]' );
+
+	// --- a settings row is writable by anything on the site ---
+	// An importer, WP-CLI or another plugin can leave an array in a row that
+	// the screen only ever writes a string into. get_audience() cast straight
+	// to string, which on PHP 8 raises "Array to string conversion" once per
+	// capability check - so on every account page load, for every vendor.
+	$warned = false;
+	set_error_handler(
+		function ( $no, $str ) use ( &$warned ) {
+			$warned = true;
+			return true;
+		}
+	);
+
+	reset_state();
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_audience'] = [ 'roles' ];
+	$junk_audience = call_priv( $INST, 'get_audience' );
+
+	reset_state();
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_audience_roles']    = 'not-an-array';
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_hideable_statuses'] = 'not-an-array';
+	$junk_roles = call_priv( $INST, 'get_audience_roles' );
+	$junk_hide  = call_priv( $INST, 'get_hideable_statuses' );
+
+	restore_error_handler();
+
+	ok( 'listings' === $junk_audience && [] === $junk_roles
+		&& [ 'publish', 'pending', 'private', 'future' ] === $junk_hide,
+		'M34 a wrong-typed settings row reads as the pre-1.7.6 behaviour in all three readers [1.7.6]' );
+	ok( ! $warned, 'M35 and raises no PHP warning on the way [1.7.6]' );
 
 	echo "\n----------------------------------------\n";
 	echo "RESULT: {$GLOBALS['_pass']} passed, {$GLOBALS['_fail']} failed\n";

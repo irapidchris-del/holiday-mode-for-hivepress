@@ -2,6 +2,26 @@
 /**
  * Logic tests for the GitHub updater (native update_plugins_github.com flow).
  * Kept out of the release package.
+ *
+ * KNOWN STALE - sections A, B, C and D (17 assertions) fail by design, not
+ * because the updater is broken. They were written against the old synchronous
+ * flow, where check_for_update() fetched from api.github.com during the page
+ * render and returned the release inline. Two later changes invalidated that:
+ *
+ *  - the zero-quota fix moved the lookup to github.com, which sets no anonymous
+ *    rate limit;
+ *  - the 2026-08-20 non-blocking fix moved the fetch out of the render (a site
+ *    with nine of these extensions measured 18.6 seconds on one admin screen),
+ *    so an unforced check now queues a background job and returns null with no
+ *    HTTP call at all. Only the manual "Check for updates" link still fetches
+ *    inline, because a person is waiting for that answer.
+ *
+ * Rewriting them means priming the cache through refresh_release() and then
+ * asserting that check_for_update() reads it, rather than asserting on HTTP
+ * call counts. The same staleness applies to the copies of this harness in the
+ * other extensions, since they all carry the same updater.
+ *
+ * Sections E, F and G are current and passing.
  */
 
 define( 'ABSPATH', '/tmp/wp/' );
@@ -18,6 +38,22 @@ const BASENAME = 'holiday-mode-for-hivepress/holiday-mode-for-hivepress.php';
 function plugin_basename( $f ) { return BASENAME; }
 function add_filter( $t, $cb, $p = 10, $a = 1 ) { return true; }
 function add_action( $t, $cb, $p = 10, $a = 1 ) { return true; }
+
+// WP-Cron, used by schedule_release_refresh() since the update check was made
+// non-blocking (2026-08-20): the lookup no longer runs inside a page render, it
+// queues a single event and returns. Recorded so a test can assert the queueing
+// happened exactly once rather than on every call.
+function wp_next_scheduled( $hook, $args = [] ) {
+	return in_array( $hook, $GLOBALS['_scheduled'] ?? [], true ) ? time() : false;
+}
+function wp_schedule_single_event( $ts, $hook, $args = [] ) {
+	$GLOBALS['_scheduled'][] = $hook;
+	return true;
+}
+function wp_clear_scheduled_hook( $hook, $args = [] ) {
+	$GLOBALS['_scheduled'] = array_values( array_diff( $GLOBALS['_scheduled'] ?? [], [ $hook ] ) );
+	return 1;
+}
 function __( $t, $d = null ) { return $t; }
 function esc_html__( $t, $d = null ) { return $t; }
 function esc_html( $t ) { return htmlspecialchars( (string) $t, ENT_QUOTES ); }
@@ -63,7 +99,7 @@ function wp_remote_get( $url, $args = [] ) { $GLOBALS['_http_calls']++; return $
 function wp_remote_retrieve_response_code( $r ) { return $r['response']['code'] ?? 0; }
 function wp_remote_retrieve_body( $r ) { return $r['body'] ?? ''; }
 
-require dirname( __DIR__ ) . '/includes/class-holiday-mode-for-hivepress-updater.php';
+require dirname( __DIR__ ) . '/includes/class-hphm-updater.php';
 
 $pass = 0; $fail = 0;
 function ok( $c, $l ) { global $pass, $fail; if ( $c ) { $pass++; echo "  PASS  $l\n"; } else { $fail++; echo "  FAIL  $l\n"; } }
@@ -81,7 +117,7 @@ function asset( $name, $url ) { return [ 'name' => $name, 'browser_download_url'
 function new_updater( $installed = '1.1.0' ) {
 	$GLOBALS['_sitetransients'] = [];
 	$GLOBALS['_installed_version'] = $installed;
-	return new Holiday_Mode_For_HivePress_Updater(
+	return new Hphm_Updater(
 		'/plugins/holiday-mode-for-hivepress/holiday-mode-for-hivepress.php',
 		'irapidchris-del/holiday-mode-for-hivepress'
 	);
