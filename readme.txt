@@ -4,7 +4,7 @@ Tags: hivepress, marketplace, vendor, listings, holiday
 Requires at least: 6.0
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 1.7.6
+Stable tag: 1.7.7
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -283,6 +283,15 @@ cancelled. Your per-listing Statistics page is unavailable while a listing
 is hidden and returns when it is restored.
 
 == Changelog ==
+
+= 1.7.7 =
+* Fixed - ending a holiday no longer fills the site with false activity pop-ups. With Social Proof
+  for HivePress active, restoring a vendor's listings was read as that vendor posting every one of
+  them again, so a vendor with twenty listings replaced the whole genuine activity feed with
+  twenty "just posted a new listing" pop-ups stamped "just now". Restoring is now as quiet in the
+  activity feed as it already was in the badge and package counts.
+* Fixed - deleting the plugin now also clears the update check's own leftovers and cancels its
+  background update check.
 
 = 1.7.6 =
 * Changed - holding a vendor's listings back over a lapsed HivePress Membership is now a setting you

@@ -79,7 +79,13 @@ HM_MEMBERSHIPS=absent php tests/logic-tests.php # no HivePress Memberships model
   listing and never the setting. Narrowing a live setting must not cost a vendor
   a listing, and the marker is cleared either way, so nothing would put it back.
 - **The updater** — release parsing, asset selection, caching, failure handling,
-  and the folder rename that keeps updates landing in the same directory.
+  and the folder rename that keeps updates landing in the same directory. Two
+  sections guard the changes that shaped the current updater: that an unforced
+  check makes no HTTP call during a page render, queueing a background refresh
+  instead, and that the lookup asks github.com before api.github.com so the
+  site's hourly API allowance is not spent. Both are asserted on behaviour --
+  which host was asked, whether anything was queued -- rather than on HTTP call
+  counts, which is what made the previous version of this suite go stale.
 
 ## Note on the version drift guard
 

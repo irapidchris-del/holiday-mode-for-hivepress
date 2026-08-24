@@ -3,7 +3,7 @@
  * Plugin Name:       Holiday Mode for HivePress
  * Plugin URI:        https://github.com/irapidchris-del/holiday-mode-for-hivepress
  * Description:       Holiday Mode toggle that hides and restores all of a vendor's listings, with an on-site banner while active and an away notice on the vendor's public profile. Restoring respects each listing's own expiry date, so a holiday never buys a listing extra visible time.
- * Version:           1.7.6
+ * Version:           1.7.7
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Requires Plugins:  hivepress
@@ -35,7 +35,7 @@ if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_REPO' ) ) {
 
 // Keep in step with the Version header above on every release.
 if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION' ) ) {
-	define( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION', '1.7.6' );
+	define( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION', '1.7.7' );
 }
 
 require_once __DIR__ . '/includes/class-hphm-updater.php';
@@ -1723,6 +1723,21 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				remove_action( 'hivepress/v1/models/listing/update_status', [ $listener[0], $listener[1] ], 10 );
 			}
 
+			/*
+			 * Social Proof for HivePress reads every draft -> publish transition as a brand new
+			 * listing (transition_post_status, includes/class-hpsp-events.php:165), so a vendor with
+			 * twenty listings coming off holiday displaced the entire genuine activity feed
+			 * site-wide with twenty fabricated "just posted a new listing" pop-ups, all timestamped
+			 * "just now". A restore is not a submission, and it must be as neutral in that feed as it
+			 * already is in the Badges and Paid Listings ledgers above.
+			 *
+			 * Through its own documented filter rather than by removing its hook: hpsp_push_event
+			 * discards an event when a callback returns an empty value, so nothing here depends on
+			 * the name or priority of a callback inside another plugin. If Social Proof is not
+			 * installed the filter simply never fires.
+			 */
+			add_filter( 'hpsp_push_event', [ $this, 'suppress_listing_published_event' ] );
+
 			$restored = 0;
 			$expired  = 0;
 
@@ -1766,6 +1781,8 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			}
 			$this->suspend_enforce = false;
 
+			remove_filter( 'hpsp_push_event', [ $this, 'suppress_listing_published_event' ] );
+
 			foreach ( $suspended as $listener ) {
 				add_action( 'hivepress/v1/models/listing/update_status', [ $listener[0], $listener[1] ], 10, $listener[2] );
 			}
@@ -1774,6 +1791,24 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				'restored' => $restored,
 				'expired'  => $expired,
 			];
+		}
+
+		/**
+		 * Drops a "new listing published" activity pop-up during a holiday restore.
+		 *
+		 * Attached only for the duration of the restore loop, and only that one event type: a
+		 * restore genuinely is not a new submission, but anything else a site happens to be doing
+		 * in the same request still deserves its pop-up.
+		 *
+		 * @param array $event Social Proof event record.
+		 * @return array Event, or an empty array to discard it.
+		 */
+		public function suppress_listing_published_event( $event ) {
+			if ( is_array( $event ) && isset( $event['type'] ) && 'listing_published' === $event['type'] ) {
+				return [];
+			}
+
+			return $event;
 		}
 
 		/**
