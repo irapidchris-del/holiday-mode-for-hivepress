@@ -106,10 +106,12 @@ hide listings on lapse can add its own gate through the
   final say either way, so a site with its own idea of who counts can still
   override any of the three choices.
 * `holiday_mode_for_hivepress_vendor_notice` ( array $notice, int $user_id )
-  Change the `title`, `message`, `icon`, `label_color`, `text_color` or
-  `icon_color` of the public "away" notice shown on the vendor's profile page,
-  or return an empty value to remove it. The values already reflect any
-  customisation made under HivePress → Settings → Holiday Mode.
+  Change the `title`, `message`, `icon`, `icon_size`, `icon_weight`,
+  `label_color`, `text_color` or `icon_color` of the public "away" notice shown
+  on the vendor's profile page, or return an empty value to remove it.
+  `icon_size` is a percentage of the surrounding text and `icon_weight` is one
+  of `''`, `semibold` or `bold`. The values already reflect any customisation
+  made under HivePress → Settings → Holiday Mode.
 
 = Automatic updates =
 
@@ -292,9 +294,10 @@ is hidden and returns when it is restored.
   control in a different place.
 
 = 1.8.1 =
-* Changed - outline icon styles now render as outlines. An icon set to an outline style
-  previously appeared filled in, because only the solid style was included with the plugin and
-  your browser quietly used that instead.
+* Housekeeping only - the icon library added in 1.8.0 shipped without its outline face, so an
+  outline icon would have drawn filled in. Nothing you can pick here was affected, because every
+  icon this plugin offers is a solid or a brand one. The library is shared with the other
+  extensions in this family, some of which do use the outline face, so it is now complete.
 
 = 1.8.0 =
 * Added - a %username% token for the away notice and banner wording. Write something like
@@ -310,7 +313,8 @@ is hidden and returns when it is restored.
   your listings are hidden, so closing it left vendors with nothing to tell them why their
   listings had disappeared.
 * Changed - the settings page opens with links that jump to each section, the sections are
-  separated, and the longer explanations have been cut to the points that matter.
+  separated, and the longer explanations have been cut to the points that matter. Those
+  explanations now wrap at a readable width instead of running the full width of a wide screen.
 * Changed - the icon library is now included with the plugin instead of being loaded from a
   third-party server, which is faster and keeps every request on your own site. Your chosen
   icon and settings are unaffected.
