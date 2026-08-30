@@ -297,6 +297,20 @@ is hidden and returns when it is restored.
   your browser quietly used that instead.
 
 = 1.8.0 =
+* Added - a %username% token for the away notice and banner wording. Write something like
+  "%username% is taking a break right now" and each vendor's own display name appears in
+  place of the token. It works in the site-wide wording you set and in the message a vendor
+  writes for themselves.
+* Added - icon choices now include the Font Awesome 6 and 7 names and the brand icons, so you
+  can use a logo where you used to be limited to the older set.
+* Added - Icon Size and Icon Weight settings for the banner and the profile notice, so the
+  icon can be made larger or heavier without any custom CSS. Leave them alone and the icons
+  look exactly as they did.
+* Changed - the away banner can no longer be dismissed. It is the only thing on screen saying
+  your listings are hidden, so closing it left vendors with nothing to tell them why their
+  listings had disappeared.
+* Changed - the settings page opens with links that jump to each section, the sections are
+  separated, and the longer explanations have been cut to the points that matter.
 * Changed - the icon library is now included with the plugin instead of being loaded from a
   third-party server, which is faster and keeps every request on your own site. Your chosen
   icon and settings are unaffected.
