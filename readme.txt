@@ -2,9 +2,9 @@
 Contributors: chrisb
 Tags: hivepress, marketplace, vendor, listings, holiday
 Requires at least: 6.0
-Tested up to: 7.0
+Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.7.7
+Stable tag: 1.8.2
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -283,6 +283,23 @@ cancelled. Your per-listing Statistics page is unavailable while a listing
 is hidden and returns when it is restored.
 
 == Changelog ==
+
+= 1.8.2 =
+* Changed - the settings screen now keeps its quick links in view as you scroll, and adds a
+  Save button and a back-to-top button that follow you down the page. The quick links, the Save
+  button and the back-to-top button now look and sit exactly the same in every one of these
+  extensions, so moving between two of their settings tabs no longer means hunting for the same
+  control in a different place.
+
+= 1.8.1 =
+* Changed - outline icon styles now render as outlines. An icon set to an outline style
+  previously appeared filled in, because only the solid style was included with the plugin and
+  your browser quietly used that instead.
+
+= 1.8.0 =
+* Changed - the icon library is now included with the plugin instead of being loaded from a
+  third-party server, which is faster and keeps every request on your own site. Your chosen
+  icon and settings are unaffected.
 
 = 1.7.7 =
 * Fixed - ending a holiday no longer fills the site with false activity pop-ups. With Social Proof

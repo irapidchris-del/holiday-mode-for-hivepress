@@ -69,6 +69,7 @@ namespace {
 		$GLOBALS['_cascade_instance'] = null; $GLOBALS['_cascade_depth'] = 0;
 		$GLOBALS['_is_admin'] = false; $GLOBALS['_badge_actions'] = [];
 		$GLOBALS['_user_caps'] = []; $GLOBALS['_options'] = [];
+		$GLOBALS['_styles_registered'] = []; $GLOBALS['_styles_enqueued'] = [];
 		$GLOBALS['_wpdb_rows'] = []; $GLOBALS['_wpdb_deleted'] = null; $GLOBALS['_cache_deleted'] = [];
 	}
 	$GLOBALS['_filters'] = [];
@@ -94,7 +95,13 @@ namespace {
 	function wp_print_inline_script_tag( $js ) { echo '<script>' . $js . '</script>'; }
 	function wp_add_inline_script( $h, $js, $p = 'after' ) { return true; }
 	function wp_enqueue_script( ...$a ) { return true; }
-	function wp_enqueue_style( ...$a ) { return true; }
+	function wp_enqueue_style( ...$a ) { $GLOBALS['_styles_enqueued'][] = $a[0] ?? ''; return true; }
+	function wp_register_style( $h, ...$a ) { $GLOBALS['_styles_registered'][ $h ] = 'plugin'; return true; }
+	function wp_style_is( $h, $s = 'enqueued' ) {
+		if ( 'registered' === $s ) { return ! empty( $GLOBALS['_styles_registered'][ $h ] ); }
+		return in_array( $h, $GLOBALS['_styles_enqueued'], true );
+	}
+	function wp_add_inline_style( $h, $css ) { return true; }
 	function plugin_basename( $f ) { return 'holiday-mode-for-hivepress/holiday-mode-for-hivepress.php'; }
 	function plugin_dir_url( $f ) { return 'http://example.test/wp-content/plugins/holiday-mode-for-hivepress/'; }
 	function home_url( $p = '' ) { return 'http://example.test' . $p; }
@@ -112,6 +119,15 @@ namespace {
 	}
 	function remove_action( $tag, $cb, $prio = 10 ) {
 		if ( 'hivepress/v1/models/listing/update_status' === $tag ) { $GLOBALS['_badge_actions'][] = 'remove'; }
+		return true;
+	}
+	// Matches by callback identity, like core: bulk_restore() removes only its
+	// own hpsp_push_event callback, and a tag-wide unset here would silently
+	// strip test-registered filters sharing the tag.
+	function remove_filter( $tag, $cb, $prio = 10 ) {
+		foreach ( $GLOBALS['_filters'][ $tag ] ?? [] as $i => $h ) {
+			if ( $h['cb'] === $cb ) { unset( $GLOBALS['_filters'][ $tag ][ $i ] ); }
+		}
 		return true;
 	}
 	// Records every fired action so tests can assert on the public hooks.
@@ -271,6 +287,10 @@ namespace {
 				if ( 'messages' === $ext ) { return getenv( 'HM_MESSAGES' ) === '1' ? '1.0.0' : null; }
 				if ( 'memberships' === $ext ) { return empty( $GLOBALS['_mem_ext'] ) ? null : '1.0.0'; }
 				return null;
+			}
+			// A slice of core's FA5 icon config is enough for the picker tests.
+			public function get_config( $name ) {
+				return 'icons' === $name ? [ 'info-circle' => 'info-circle', 'anchor' => 'anchor' ] : [];
 			}
 		};
 	}
@@ -655,6 +675,21 @@ namespace {
 		reset_state(); $GLOBALS['_current_user_id'] = 0;
 		ob_start(); $INST->maybe_print_banner(); $o = ob_get_clean();
 		ok( '' === trim( $o ), 'I4 logged out -> no banner' );
+
+		// 1.8.0: the banner is deliberately not dismissible - it is the only
+		// reminder that every listing is hidden.
+		reset_state(); $GLOBALS['_current_user_id'] = 10; $GLOBALS['_vendor_first_id'] = 88;
+		$GLOBALS['_usermeta'][10]['_holiday_mode_for_hivepress'] = true;
+		ob_start(); $INST->maybe_print_banner(); $o = ob_get_clean();
+		ok( false === strpos( $o, 'button' ) && false === stripos( $o, 'dismiss' ), 'I5 banner carries no dismiss control [1.8.0]' );
+
+		// 1.8.0: %username% resolves to the vendor's display name.
+		reset_state(); $GLOBALS['_current_user_id'] = 10; $GLOBALS['_vendor_first_id'] = 88;
+		$GLOBALS['_usermeta'][10]['_holiday_mode_for_hivepress'] = true;
+		$GLOBALS['_users'][10] = [ 'display_name' => 'Alice Vendor' ];
+		$GLOBALS['_options']['hp_holiday_mode_for_hivepress_banner_label'] = 'Holiday Mode Enabled - %username% is away.';
+		ob_start(); $INST->maybe_print_banner(); $o = ob_get_clean();
+		ok( false !== strpos( $o, 'Alice Vendor is away.' ) && false === strpos( $o, '%username%' ), 'I6 banner %username% token replaced with the display name [1.8.0]' );
 	}
 
 	/* ===================== J. public vendor notice ===================== */
@@ -739,7 +774,13 @@ namespace {
 	// a default of true would switch the gate on for everybody at first save.
 	ok( is_array( $gate ) && 'checkbox' === $gate['type'] && ! array_key_exists( 'default', $gate ), 'K5b restore gate is an opt-in checkbox with no default [1.7.6]' );
 	$icon = $tab['sections']['holiday_mode_for_hivepress_notice']['fields']['holiday_mode_for_hivepress_notice_icon'] ?? null;
-	ok( is_array( $icon ) && 'select' === $icon['type'] && 'icons' === $icon['options'], 'K6 icon field uses HivePress icon list [1.7.0]' );
+	// 1.8.0: the field carries the resolved list itself (core's plus the
+	// FA6/7 and brand additions) with the data-template attribute core's
+	// resolver would have set, so the select2 previews keep working.
+	ok( is_array( $icon ) && 'select' === $icon['type'] && is_array( $icon['options'] )
+		&& isset( $icon['options']['anchor'], $icon['options']['sailboat'], $icon['options']['github'] )
+		&& 'icon' === ( $icon['attributes']['data-template'] ?? null ),
+		'K6 icon list keeps core icons, adds FA6/7 + brands, previews intact [1.8.0]' );
 	$ref = new ReflectionClass( $INST );
 	ok( 'hp_holiday_mode_for_hivepress_delete_data' === $ref->getConstant( 'DELETE_DATA_OPTION' ), 'K7 option constant matches hp\prefix()' );
 	ok( 'hp_holiday_mode_for_hivepress_require_membership' === $ref->getConstant( 'REQUIRE_MEMBERSHIP_OPTION' ), 'K7b gate constant matches its hp\prefix()ed field key [1.7.6]' );
@@ -873,6 +914,44 @@ namespace {
 		ok( false === strpos( $html, 'javascript' ), 'L22 malformed background from the filter is rejected [1.7.1]' );
 		unset( $GLOBALS['_filters']['holiday_mode_for_hivepress_vendor_notice'] );
 	}
+
+	// The %username% token (1.8.0). Resolved at render time against the
+	// vendor the notice is about, wherever the wording came from.
+	reset_state();
+	$GLOBALS['_users'][10] = [ 'display_name' => 'Alice Vendor' ];
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_notice_message'] = '%username% is taking a break right now.';
+	$html = holiday_mode_for_hivepress_vendor_notice( 10 );
+	ok( false !== strpos( $html, 'Alice Vendor is taking a break right now.' ) && false === strpos( $html, '%username%' ),
+		'L23 %username% in the notice message becomes the display name [1.8.0]' );
+
+	reset_state();
+	$GLOBALS['_users'][10] = [ 'display_name' => 'Alice Vendor' ];
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_notice_label'] = 'About %username%';
+	ok( false !== strpos( holiday_mode_for_hivepress_vendor_notice( 10 ), 'About Alice Vendor' ),
+		'L24 %username% works in the notice label too [1.8.0]' );
+
+	// A display name is user-supplied text and the token must not become an
+	// injection point: the replacement happens before the output escaping.
+	reset_state();
+	$GLOBALS['_users'][10] = [ 'display_name' => '<script>x</script>' ];
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_notice_label'] = 'About %username%';
+	ok( false === strpos( holiday_mode_for_hivepress_vendor_notice( 10 ), '<script>' ),
+		'L25 a display name carrying markup is escaped on output [1.8.0]' );
+
+	// An unknown user resolves to an empty name rather than a leftover token.
+	reset_state();
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_notice_label'] = 'About %username%';
+	ok( false === strpos( holiday_mode_for_hivepress_vendor_notice( 10 ), '%username%' ),
+		'L26 no such user -> token removed, not printed [1.8.0]' );
+
+	// The vendor's own away message supports the token as well, since the
+	// replacement runs after every text source has been merged.
+	reset_state();
+	$GLOBALS['_users'][10] = [ 'display_name' => 'Alice Vendor' ];
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_vendor_custom'] = 1;
+	$GLOBALS['_usermeta'][10]['_holiday_mode_for_hivepress_headline'] = '%username% is fishing';
+	ok( false !== strpos( holiday_mode_for_hivepress_vendor_notice( 10 ), 'Alice Vendor is fishing' ),
+		'L27 %username% in a vendor-written message resolves too [1.8.0]' );
 
 	/* ===================== M. audience + hide list (1.7.6) ===================== */
 	echo "\n[M] who can use holiday mode, and what gets hidden\n";
@@ -1062,6 +1141,120 @@ namespace {
 		&& [ 'publish', 'pending', 'private', 'future' ] === $junk_hide,
 		'M34 a wrong-typed settings row reads as the pre-1.7.6 behaviour in all three readers [1.7.6]' );
 	ok( ! $warned, 'M35 and raises no PHP warning on the way [1.7.6]' );
+
+	/* ===================== N. icon options (1.8.0) ===================== */
+	echo "\n[N] icon size, weight, Font Awesome 6/7 + brands\n";
+
+	// Class mapping: brands live in their own font family, the FA6/7 solid
+	// additions need the plugin stylesheet's fa-solid class, and everything
+	// FA5-era keeps the fas class core's own stylesheet renders.
+	reset_state();
+	ok( 'fa-brands fa-github' === $INST->get_icon_class( 'github' ), 'N1 brand icon -> fa-brands [1.8.0]' );
+	ok( 'fa-solid fa-sailboat' === $INST->get_icon_class( 'sailboat' ), 'N2 FA6/7 solid icon -> fa-solid [1.8.0]' );
+	ok( 'fas fa-info-circle' === $INST->get_icon_class( 'info-circle' ), 'N3 FA5-era icon keeps fas [1.8.0]' );
+	ok( $INST->icon_needs_fontawesome( 'github' ) && $INST->icon_needs_fontawesome( 'sailboat' )
+		&& ! $INST->icon_needs_fontawesome( 'info-circle' ), 'N4 only added icons ask for the plugin stylesheet [1.8.0]' );
+
+	// Size and weight defaults: the pre-1.8.0 hardcoded percentages survive.
+	reset_state();
+	$d = $INST->get_notice_args( 'notice' );
+	$b = $INST->get_notice_args( 'banner' );
+	ok( 150 === $d['icon_size'] && 130 === $b['icon_size'] && '' === $d['icon_weight'],
+		'N5 defaults keep the pre-1.8.0 sizes and normal weight [1.8.0]' );
+
+	reset_state();
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_notice_icon_size']   = '220';
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_notice_icon_weight'] = 'bold';
+	$d = $INST->get_notice_args( 'notice' );
+	ok( 220 === $d['icon_size'] && 'bold' === $d['icon_weight'], 'N6 configured size and weight are read [1.8.0]' );
+
+	// A cleared number field stores '' (the stored-empty trap), and junk of
+	// any kind must fall back rather than reach a style attribute.
+	reset_state();
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_notice_icon_size']   = '';
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_banner_icon_size']   = '9000';
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_notice_icon_weight'] = 'ultra';
+	ok( 150 === $INST->get_notice_args( 'notice' )['icon_size']
+		&& 130 === $INST->get_notice_args( 'banner' )['icon_size']
+		&& '' === $INST->get_notice_args( 'notice' )['icon_weight'],
+		'N7 blank, out-of-range and unknown stored values fall back [1.8.0]' );
+
+	// The stroke is a fixed map in currentColor, so it composes with the
+	// icon colour option by definition.
+	ok( '' === $INST->get_icon_stroke_css( '' )
+		&& '-webkit-text-stroke:0.3px currentColor;paint-order:stroke fill;' === $INST->get_icon_stroke_css( 'semibold' )
+		&& '-webkit-text-stroke:0.5px currentColor;paint-order:stroke fill;' === $INST->get_icon_stroke_css( 'bold' ),
+		'N8 weight maps to the two stroke widths, in currentColor [1.8.0]' );
+
+	// Profile notice rendering: class, size, stroke and the stylesheet.
+	reset_state();
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_notice_icon']        = 'github';
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_notice_icon_size']   = '200';
+	$GLOBALS['_options']['hp_holiday_mode_for_hivepress_notice_icon_weight'] = 'semibold';
+	$html = holiday_mode_for_hivepress_vendor_notice( 10 );
+	ok( false !== strpos( $html, 'fa-brands fa-github' ), 'N9 profile notice emits the brand class [1.8.0]' );
+	ok( false !== strpos( $html, 'font-size:200%' ), 'N10 configured icon size rendered [1.8.0]' );
+	ok( false !== strpos( $html, '-webkit-text-stroke:0.3px currentColor' ), 'N11 weight stroke rendered [1.8.0]' );
+	ok( in_array( 'freestylr-fontawesome', $GLOBALS['_styles_enqueued'], true ), 'N12 brand icon enqueues the shared stylesheet [1.8.0]' );
+
+	reset_state();
+	$html = holiday_mode_for_hivepress_vendor_notice( 10 );
+	ok( false !== strpos( $html, 'fas fa-info-circle' ) && false !== strpos( $html, 'font-size:150%' ),
+		'N13 defaults render exactly as before 1.8.0 [1.8.0]' );
+	ok( ! in_array( 'freestylr-fontawesome', $GLOBALS['_styles_enqueued'], true ),
+		'N14 an FA5-era icon loads no extra stylesheet [1.8.0]' );
+
+	// The filter can hand back junk for the new keys too.
+	reset_state();
+	$GLOBALS['_filters']['holiday_mode_for_hivepress_vendor_notice'] = [ [ 'cb' => function ( $n ) { $n['icon_size'] = 'expression(alert(1))'; $n['icon_weight'] = '";}'; return $n; }, 'prio' => 10, 'args' => 1 ] ];
+	$html = holiday_mode_for_hivepress_vendor_notice( 10 );
+	ok( false !== strpos( $html, 'font-size:150%' ) && false === strpos( $html, 'expression' ) && false === strpos( $html, 'text-stroke' ),
+		'N15 junk size and weight from the filter fall back cleanly [1.8.0]' );
+	unset( $GLOBALS['_filters']['holiday_mode_for_hivepress_vendor_notice'] );
+
+	// Banner rendering and the early enqueue (the banner prints after the
+	// late-styles cutoff, so its stylesheet decision runs at
+	// wp_enqueue_scripts and must mirror the banner gates).
+	if ( $VEN ) {
+		reset_state(); $GLOBALS['_current_user_id'] = 10; $GLOBALS['_vendor_first_id'] = 88;
+		$GLOBALS['_usermeta'][10]['_holiday_mode_for_hivepress'] = true;
+		$GLOBALS['_options']['hp_holiday_mode_for_hivepress_banner_icon']        = 'github';
+		$GLOBALS['_options']['hp_holiday_mode_for_hivepress_banner_icon_weight'] = 'bold';
+		ob_start(); $INST->maybe_print_banner(); $o = ob_get_clean();
+		ok( false !== strpos( $o, 'fa-brands fa-github' ) && false !== strpos( $o, '0.5px currentColor' ),
+			'N16 banner emits the brand class and stroke [1.8.0]' );
+
+		$INST->maybe_enqueue_fontawesome();
+		ok( in_array( 'freestylr-fontawesome', $GLOBALS['_styles_enqueued'], true ),
+			'N17 banner with a brand icon enqueues the stylesheet early [1.8.0]' );
+
+		reset_state(); $GLOBALS['_current_user_id'] = 10; $GLOBALS['_vendor_first_id'] = 88;
+		$GLOBALS['_usermeta'][10]['_holiday_mode_for_hivepress'] = true;
+		$INST->maybe_enqueue_fontawesome();
+		ok( ! in_array( 'freestylr-fontawesome', $GLOBALS['_styles_enqueued'], true ),
+			'N18 default icon -> no early enqueue [1.8.0]' );
+
+		reset_state(); $GLOBALS['_current_user_id'] = 10; $GLOBALS['_vendor_first_id'] = 88;
+		$GLOBALS['_options']['hp_holiday_mode_for_hivepress_banner_icon'] = 'github';
+		$INST->maybe_enqueue_fontawesome();
+		ok( ! in_array( 'freestylr-fontawesome', $GLOBALS['_styles_enqueued'], true ),
+			'N19 holiday off -> no early enqueue [1.8.0]' );
+	}
+
+	// The shared handle: registered only when nobody else got there first,
+	// so one copy serves every plugin using it.
+	reset_state();
+	$INST->enqueue_fontawesome();
+	ok( ! empty( $GLOBALS['_styles_registered']['freestylr-fontawesome'] )
+		&& in_array( 'freestylr-fontawesome', $GLOBALS['_styles_enqueued'], true ),
+		'N20 stylesheet registered and enqueued under the shared handle [1.8.0]' );
+
+	reset_state();
+	$GLOBALS['_styles_registered']['freestylr-fontawesome'] = 'someone-else';
+	$INST->enqueue_fontawesome();
+	ok( 'someone-else' === $GLOBALS['_styles_registered']['freestylr-fontawesome']
+		&& in_array( 'freestylr-fontawesome', $GLOBALS['_styles_enqueued'], true ),
+		'N21 an already-registered shared handle is enqueued, not re-registered [1.8.0]' );
 
 	echo "\n----------------------------------------\n";
 	echo "RESULT: {$GLOBALS['_pass']} passed, {$GLOBALS['_fail']} failed\n";

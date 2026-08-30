@@ -3,7 +3,7 @@
  * Plugin Name:       Holiday Mode for HivePress
  * Plugin URI:        https://github.com/irapidchris-del/holiday-mode-for-hivepress
  * Description:       Holiday Mode toggle that hides and restores all of a vendor's listings, with an on-site banner while active and an away notice on the vendor's public profile. Restoring respects each listing's own expiry date, so a holiday never buys a listing extra visible time.
- * Version:           1.7.7
+ * Version:           1.8.2
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Requires Plugins:  hivepress
@@ -35,7 +35,7 @@ if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_REPO' ) ) {
 
 // Keep in step with the Version header above on every release.
 if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION' ) ) {
-	define( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION', '1.7.7' );
+	define( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION', '1.8.2' );
 }
 
 require_once __DIR__ . '/includes/class-hphm-updater.php';
@@ -157,6 +157,102 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		const ICON_DEFAULT = 'info-circle';
 
 		/**
+		 * The shared Font Awesome stylesheet. HivePress core only enqueues
+		 * Font Awesome 5 SOLID, so the newer solid icons and every brand icon
+		 * offered below render blank unless the plugin loads Font Awesome
+		 * itself. The handle is shared across this author's plugins on
+		 * purpose: each one registers it only if no other already has, so one
+		 * copy serves however many are active.
+		 *
+		 * The path is relative to this file and the files are BUNDLED - see
+		 * enqueue_fontawesome() below for why a CDN URL must never go here.
+		 */
+		const FONTAWESOME_HANDLE  = 'freestylr-fontawesome';
+		const FONTAWESOME_VERSION = '7.1.0';
+		const FONTAWESOME_PATH    = 'assets/vendor/fontawesome/css/all.min.css';
+
+		/**
+		 * Solid icons offered on top of core's Font Awesome 5 picker list.
+		 * Names introduced in Font Awesome 6/7, so every one needs the
+		 * stylesheet above; each is verified against the free solid set
+		 * (Pro-only names render blank and must not be offered).
+		 */
+		const ICONS_SOLID_EXTRA = [
+			'bell-concierge',
+			'calendar-days',
+			'cart-flatbed-suitcase',
+			'champagne-glasses',
+			'circle-info',
+			'clock-rotate-left',
+			'earth-americas',
+			'location-dot',
+			'map-location-dot',
+			'martini-glass',
+			'mug-saucer',
+			'person-walking-luggage',
+			'plane-circle-check',
+			'plane-circle-exclamation',
+			'plane-up',
+			'sailboat',
+			'shield-heart',
+			'tent',
+			'van-shuttle',
+		];
+
+		/**
+		 * Brand icons offered in the picker. Brands live in their own font
+		 * family, so the render path must emit `fa-brands` for these where
+		 * everything else gets a solid class: this list is what tracks which
+		 * is which.
+		 */
+		const ICONS_BRAND = [
+			'airbnb',
+			'amazon',
+			'android',
+			'apple',
+			'behance',
+			'discord',
+			'dribbble',
+			'ebay',
+			'etsy',
+			'facebook',
+			'github',
+			'google',
+			'instagram',
+			'linkedin',
+			'medium',
+			'paypal',
+			'pinterest',
+			'reddit',
+			'shopify',
+			'skype',
+			'slack',
+			'snapchat',
+			'spotify',
+			'stripe',
+			'telegram',
+			'threads',
+			'tiktok',
+			'tumblr',
+			'twitch',
+			'viber',
+			'vimeo',
+			'whatsapp',
+			'wordpress',
+			'x-twitter',
+			'youtube',
+		];
+
+		/**
+		 * Icon weight choices, as text-stroke widths. The stroke is drawn in
+		 * currentColor, so it always follows the icon colour option.
+		 */
+		const ICON_STROKES = [
+			'semibold' => '0.3px',
+			'bold'     => '0.5px',
+		];
+
+		/**
 		 * Singleton instance.
 		 *
 		 * @var Holiday_Mode_For_HivePress|null
@@ -240,6 +336,13 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 
 			// Banner on account pages while holiday mode is active.
 			add_action( 'wp_footer', [ $this, 'maybe_print_banner' ], 1000 );
+
+			// The banner prints at wp_footer 1000, which is after the point
+			// where late styles go out, so a banner icon that needs the
+			// Font Awesome stylesheet has to be spotted here instead. The
+			// profile notice needs no such hook: it renders mid-page, early
+			// enough to enqueue for itself.
+			add_action( 'wp_enqueue_scripts', [ $this, 'maybe_enqueue_fontawesome' ] );
 
 			// Public notice on the vendor's profile page, so buyers know the
 			// vendor is away and may be slower to reply. The `/blocks` variant
@@ -391,7 +494,7 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			$banner_icon_default = $this->get_color_option( 'banner_label_color', self::COLOR_DEFAULT );
 			$notice_icon_default = $this->get_color_option( 'notice_label_color', self::COLOR_DEFAULT );
 
-			$bg_color_description = esc_html__( 'Pick a colour or paste a 6-digit hex code such as #d9edf7. Leave blank to use the standard light blue. The border shades itself to match, and if you choose a dark background, set the label and text colours to something light.', 'holiday-mode-for-hivepress' );
+			$bg_color_description = esc_html__( 'Pick a colour or paste a 6-digit hex code such as #d9edf7. Leave blank to use the standard light blue. The border shades itself to match; with a dark background, choose light label and text colours.', 'holiday-mode-for-hivepress' );
 
 			// The blank key is the current behaviour on purpose. Core's Select
 			// field prepends its own '&mdash;' placeholder option whenever the
@@ -439,6 +542,43 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				$status_options[ $status ] = esc_html( $status_object && $status_object->label ? $status_object->label : $status );
 			}
 
+			// Core's picker list plus the Font Awesome 6/7 additions above.
+			// Passing `'options' => 'icons'` would hand the field to core's
+			// resolver (`components/class-form.php:85`), which returns the
+			// FA5-era config with no way in, so the same list is fetched and
+			// extended here; the data-template attribute set on each icon
+			// field below is what that resolver would have set, and is what
+			// keeps the select2 icon previews working.
+			$icon_options = [];
+
+			if ( function_exists( 'hivepress' ) ) {
+				$icon_options = (array) hivepress()->get_config( 'icons' );
+			}
+
+			foreach ( self::ICONS_SOLID_EXTRA as $icon_name ) {
+				$icon_options[ $icon_name ] = $icon_name;
+			}
+
+			foreach ( self::ICONS_BRAND as $icon_name ) {
+				/* translators: %s: the brand icon's name. */
+				$icon_options[ $icon_name ] = sprintf( esc_html__( '%s (brand)', 'holiday-mode-for-hivepress' ), $icon_name );
+			}
+
+			ksort( $icon_options );
+
+			$icon_size_description = esc_html__( 'Size as a percentage of the surrounding text, between 50 and 400. Leave blank for the standard size.', 'holiday-mode-for-hivepress' );
+
+			// The blank key is named for the same reason as the audience
+			// select above: an unnamed blank renders as core's em-dash
+			// placeholder and reads as "nothing chosen".
+			$icon_weight_options = [
+				''         => esc_html__( 'Normal', 'holiday-mode-for-hivepress' ),
+				'semibold' => esc_html__( 'Semi-bold', 'holiday-mode-for-hivepress' ),
+				'bold'     => esc_html__( 'Bold', 'holiday-mode-for-hivepress' ),
+			];
+
+			$icon_weight_description = esc_html__( 'Draws a slightly heavier outline in the icon colour. Normal leaves the icon as the font draws it.', 'holiday-mode-for-hivepress' );
+
 			$settings[ self::SETTINGS_TAB ] = [
 				'title'    => esc_html__( 'Holiday Mode', 'holiday-mode-for-hivepress' ),
 				'_order'   => 100,
@@ -452,7 +592,7 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 						'fields'      => [
 							'holiday_mode_for_hivepress_audience' => [
 								'label'       => esc_html__( 'Offer the Switch To', 'holiday-mode-for-hivepress' ),
-								'description' => esc_html__( 'Leave this alone unless you have a reason to narrow it. Vendors and anyone with a listing is how the plugin has always behaved: a user counts if HivePress has given them a vendor profile, or if they have written at least one listing in any status. Vendors only drops that second half, so somebody whose listing is still unfinished does not get the switch until HivePress has made them a vendor. Chosen roles ignores both tests and goes purely by the roles you tick below.', 'holiday-mode-for-hivepress' ),
+								'description' => esc_html__( 'Vendors and anyone with a listing is the standard behaviour. Vendors only requires a HivePress vendor profile. Chosen roles goes purely by the roles you tick below.', 'holiday-mode-for-hivepress' ),
 								'type'        => 'select',
 								'options'     => $audience_options,
 								'_order'      => 10,
@@ -460,7 +600,7 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 
 							'holiday_mode_for_hivepress_audience_roles' => [
 								'label'       => esc_html__( 'Chosen Roles', 'holiday-mode-for-hivepress' ),
-								'description' => esc_html__( 'Read only when the choice above is set to chosen roles, and ignored entirely otherwise. A user holding any one of the ticked roles is offered the switch. Tick nothing and nobody but an administrator is, which is worth knowing before you set the choice above and walk away.', 'holiday-mode-for-hivepress' ),
+								'description' => esc_html__( 'Read only when the choice above is Chosen roles. A user holding any ticked role is offered the switch; tick nothing and only administrators are.', 'holiday-mode-for-hivepress' ),
 								'type'        => 'checkboxes',
 								'options'     => $role_options,
 								'_order'      => 20,
@@ -470,13 +610,14 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 
 					'holiday_mode_for_hivepress_banner'  => [
 						'title'       => esc_html__( 'Vendor Banner', 'holiday-mode-for-hivepress' ),
-						'description' => esc_html__( 'This banner appears at the top of the account pages, but only for a vendor whose own holiday mode is switched on. It reminds them that their listings are currently hidden. Leave any field blank to use the standard design.', 'holiday-mode-for-hivepress' ),
+						'description' => esc_html__( 'Shown at the top of the account pages for a vendor whose own holiday mode is on, reminding them their listings are hidden. Leave any field blank to use the standard design.', 'holiday-mode-for-hivepress' ),
 						'_order'      => 10,
 
 						'fields'      => [
 							'holiday_mode_for_hivepress_banner_label' => [
 								'label'       => esc_html__( 'Banner Label', 'holiday-mode-for-hivepress' ),
-								'description' => esc_html__( 'The short bold text at the start of the banner. Leave blank to use the standard wording.', 'holiday-mode-for-hivepress' ),
+								/* translators: %username% is typed literally by the site owner; it is replaced with the vendor's display name. */
+								'description' => esc_html__( 'The short bold text at the start of the banner. Leave blank to use the standard wording. %username% shows the vendor\'s display name.', 'holiday-mode-for-hivepress' ),
 								'placeholder' => __( 'Holiday mode is active.', 'holiday-mode-for-hivepress' ),
 								'type'        => 'text',
 								'max_length'  => 100,
@@ -486,8 +627,8 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 
 							'holiday_mode_for_hivepress_banner_message' => [
 								'label'       => esc_html__( 'Banner Message', 'holiday-mode-for-hivepress' ),
-								/* translators: %s is typed literally by the site owner; it marks where the account settings link goes in the banner. */
-								'description' => esc_html__( 'The sentence after the label. Type %s where the link to the account settings page should appear. Leave blank to use the standard wording.', 'holiday-mode-for-hivepress' ),
+								/* translators: %s and %username% are typed literally by the site owner; %s marks where the account settings link goes and %username% is replaced with the vendor's display name. */
+								'description' => esc_html__( 'The sentence after the label. Type %s where the link to the account settings page should appear. Leave blank to use the standard wording. %username% shows the vendor\'s display name.', 'holiday-mode-for-hivepress' ), // phpcs:ignore WordPress.WP.I18n.UnorderedPlaceholdersText -- %username% is a literal token shown to the site owner, not a printf placeholder; the sniff reads its "%u" as one.
 								/* translators: %s is the linked "Account → Settings" text. */
 								'placeholder' => __( 'Your listings are hidden from visitors until you switch it off in %s.', 'holiday-mode-for-hivepress' ),
 								'type'        => 'textarea',
@@ -498,10 +639,31 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 
 							'holiday_mode_for_hivepress_banner_icon' => [
 								'label'       => esc_html__( 'Banner Icon', 'holiday-mode-for-hivepress' ),
-								'description' => esc_html__( 'The icon shown at the start of the banner. Leave empty to use the information icon.', 'holiday-mode-for-hivepress' ),
+								'description' => esc_html__( 'The icon shown at the start of the banner. Leave empty to use the information icon. Brand icons are marked in the list.', 'holiday-mode-for-hivepress' ),
 								'type'        => 'select',
-								'options'     => 'icons',
+								'options'     => $icon_options,
+								'attributes'  => [
+									'data-template' => 'icon',
+								],
 								'_order'      => 30,
+							],
+
+							'holiday_mode_for_hivepress_banner_icon_size' => [
+								'label'       => esc_html__( 'Banner Icon Size', 'holiday-mode-for-hivepress' ),
+								'description' => $icon_size_description,
+								'placeholder' => '130',
+								'type'        => 'number',
+								'min_value'   => 50,
+								'max_value'   => 400,
+								'_order'      => 31,
+							],
+
+							'holiday_mode_for_hivepress_banner_icon_weight' => [
+								'label'       => esc_html__( 'Banner Icon Weight', 'holiday-mode-for-hivepress' ),
+								'description' => $icon_weight_description,
+								'type'        => 'select',
+								'options'     => $icon_weight_options,
+								'_order'      => 32,
 							],
 
 							'holiday_mode_for_hivepress_banner_icon_color' => [
@@ -548,21 +710,22 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 
 					'holiday_mode_for_hivepress_notice'  => [
 						'title'       => esc_html__( 'Profile Notice', 'holiday-mode-for-hivepress' ),
-						'description' => esc_html__( 'This notice appears on a vendor\'s public profile while their holiday mode is switched on. It replaces the listings heading and the listings area, so visitors know the vendor is away rather than gone.', 'holiday-mode-for-hivepress' ),
+						'description' => esc_html__( 'Shown on a vendor\'s public profile while their holiday mode is on, replacing the listings area so visitors know the vendor is away rather than gone.', 'holiday-mode-for-hivepress' ),
 						'_order'      => 20,
 
 						'fields'      => [
 							'holiday_mode_for_hivepress_vendor_custom' => [
 								'label'       => esc_html__( 'Vendor Messages', 'holiday-mode-for-hivepress' ),
 								'caption'     => esc_html__( 'Let each vendor write their own away message', 'holiday-mode-for-hivepress' ),
-								'description' => esc_html__( 'With this ticked, two extra fields appear under the Holiday mode switch in each vendor\'s account settings: a headline and a short explanation. A vendor\'s own words then replace the label and message below on their profile, keeping the same icon and colours. Vendors who leave them blank get the notice configured here.', 'holiday-mode-for-hivepress' ),
+								'description' => esc_html__( 'Adds headline and message fields to each vendor\'s account settings. A vendor\'s own words then replace the label and message below on their profile; blank fields fall back to the notice configured here.', 'holiday-mode-for-hivepress' ),
 								'type'        => 'checkbox',
 								'_order'      => 5,
 							],
 
 							'holiday_mode_for_hivepress_notice_label' => [
 								'label'       => esc_html__( 'Notice Label', 'holiday-mode-for-hivepress' ),
-								'description' => esc_html__( 'The short bold heading of the notice. Leave blank to use the standard wording.', 'holiday-mode-for-hivepress' ),
+								/* translators: %username% is typed literally by the site owner; it is replaced with the vendor's display name. */
+								'description' => esc_html__( 'The short bold heading of the notice. Leave blank to use the standard wording. %username% shows the vendor\'s display name.', 'holiday-mode-for-hivepress' ),
 								'placeholder' => __( 'On holiday', 'holiday-mode-for-hivepress' ),
 								'type'        => 'text',
 								'max_length'  => 100,
@@ -572,7 +735,8 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 
 							'holiday_mode_for_hivepress_notice_message' => [
 								'label'       => esc_html__( 'Notice Message', 'holiday-mode-for-hivepress' ),
-								'description' => esc_html__( 'The text under the heading. Leave blank to use the standard wording, which mentions messaging only when the Messages extension is active.', 'holiday-mode-for-hivepress' ),
+								/* translators: %username% is typed literally by the site owner; it is replaced with the vendor's display name. */
+								'description' => esc_html__( 'The text under the heading. Leave blank to use the standard wording, which mentions messaging only when the Messages extension is active. %username% shows the vendor\'s display name.', 'holiday-mode-for-hivepress' ),
 								'placeholder' => __( 'This user is on holiday at the moment. You can still send them a message, but they may take longer than usual to reply.', 'holiday-mode-for-hivepress' ),
 								'type'        => 'textarea',
 								'max_length'  => 500,
@@ -582,10 +746,31 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 
 							'holiday_mode_for_hivepress_notice_icon' => [
 								'label'       => esc_html__( 'Notice Icon', 'holiday-mode-for-hivepress' ),
-								'description' => esc_html__( 'The icon shown at the start of the notice. Leave empty to use the information icon.', 'holiday-mode-for-hivepress' ),
+								'description' => esc_html__( 'The icon shown at the start of the notice. Leave empty to use the information icon. Brand icons are marked in the list.', 'holiday-mode-for-hivepress' ),
 								'type'        => 'select',
-								'options'     => 'icons',
+								'options'     => $icon_options,
+								'attributes'  => [
+									'data-template' => 'icon',
+								],
 								'_order'      => 30,
+							],
+
+							'holiday_mode_for_hivepress_notice_icon_size' => [
+								'label'       => esc_html__( 'Notice Icon Size', 'holiday-mode-for-hivepress' ),
+								'description' => $icon_size_description,
+								'placeholder' => '150',
+								'type'        => 'number',
+								'min_value'   => 50,
+								'max_value'   => 400,
+								'_order'      => 31,
+							],
+
+							'holiday_mode_for_hivepress_notice_icon_weight' => [
+								'label'       => esc_html__( 'Notice Icon Weight', 'holiday-mode-for-hivepress' ),
+								'description' => $icon_weight_description,
+								'type'        => 'select',
+								'options'     => $icon_weight_options,
+								'_order'      => 32,
 							],
 
 							'holiday_mode_for_hivepress_notice_icon_color' => [
@@ -632,13 +817,13 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 
 					'holiday_mode_for_hivepress_hiding'  => [
 						'title'       => esc_html__( 'Hiding Listings', 'holiday-mode-for-hivepress' ),
-						'description' => esc_html__( 'Holiday mode only ever touches listings in the statuses ticked below. Anything else, including a vendor\'s own unfinished listings and anything in the bin, is left exactly where it is.', 'holiday-mode-for-hivepress' ),
+						'description' => esc_html__( 'Holiday mode only ever touches listings in the statuses ticked below. Anything else, including unfinished listings and the bin, is left alone.', 'holiday-mode-for-hivepress' ),
 						'_order'      => 25,
 
 						'fields'      => [
 							'holiday_mode_for_hivepress_hideable_statuses' => [
 								'label'       => esc_html__( 'Statuses to Hide', 'holiday-mode-for-hivepress' ),
-								'description' => esc_html__( 'Leave all four ticked unless you have a reason not to. Narrowing this changes only what a future holiday hides: listings already hidden still come back to the status they actually had, so nothing a vendor is away on is stranded by a change made here. Unticking every box is read as all four, because a holiday mode that hides nothing would be a switch that does nothing.', 'holiday-mode-for-hivepress' ),
+								'description' => esc_html__( 'Narrowing this changes only what a future holiday hides: listings already hidden still come back to the status they had. Unticking every box is read as all four.', 'holiday-mode-for-hivepress' ),
 								'type'        => 'checkboxes',
 								'options'     => $status_options,
 								'_order'      => 10,
@@ -648,14 +833,14 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 
 					'holiday_mode_for_hivepress_restore' => [
 						'title'       => esc_html__( 'Restoring Listings', 'holiday-mode-for-hivepress' ),
-						'description' => esc_html__( 'Holiday mode brings a vendor\'s listings back when they switch it off. This section decides whether a lapsed HivePress Membership is allowed to stand in the way.', 'holiday-mode-for-hivepress' ),
+						'description' => esc_html__( 'Listings come back when a vendor switches holiday mode off. This section decides whether a lapsed HivePress Membership is allowed to stand in the way.', 'holiday-mode-for-hivepress' ),
 						'_order'      => 30,
 
 						'fields'      => [
 							'holiday_mode_for_hivepress_require_membership' => [
 								'label'       => esc_html__( 'Membership Required to Restore', 'holiday-mode-for-hivepress' ),
 								'caption'     => esc_html__( 'Ask a vendor to renew a lapsed membership before their listings come back', 'holiday-mode-for-hivepress' ),
-								'description' => esc_html__( 'Leave this unticked unless you deliberately want that gate. With it ticked, a vendor whose HivePress Membership has lapsed cannot switch holiday mode off: they are asked to renew first, and their listings stay hidden until they do. It has any effect at all only where HivePress Memberships is active and membership restrictions cover listings. Bear in mind that HivePress leaves a vendor\'s already published listings visible when their membership lapses, so ticking this asks something of a vendor who used holiday mode that is asked of nobody else.', 'holiday-mode-for-hivepress' ),
+								'description' => esc_html__( 'With this ticked, a vendor whose HivePress Membership has lapsed must renew before their listings come back. It only takes effect where HivePress Memberships is active and covers listings. Leave unticked unless you deliberately want that gate.', 'holiday-mode-for-hivepress' ),
 								'type'        => 'checkbox',
 								'_order'      => 10,
 							],
@@ -664,14 +849,14 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 
 					'holiday_mode_for_hivepress_removal' => [
 						'title'       => esc_html__( 'Removing the Plugin', 'holiday-mode-for-hivepress' ),
-						'description' => esc_html__( 'Your settings are kept if you delete this plugin, so you can reinstall it and carry on. WordPress shows its own warning on the delete screen saying the data goes too, but that warning is the same for every plugin and does not apply here unless you tick the box below. Switching the plugin off never removes anything, and deleting it always brings hidden listings back first.', 'holiday-mode-for-hivepress' ),
+						'description' => esc_html__( 'Your settings are kept if you delete this plugin, whatever the delete screen\'s generic warning says, unless you tick the box below. Deleting the plugin always brings hidden listings back first.', 'holiday-mode-for-hivepress' ),
 						'_order'      => 100,
 
 						'fields'      => [
 							'holiday_mode_for_hivepress_delete_data' => [
 								'label'       => esc_html__( 'Delete All Data', 'holiday-mode-for-hivepress' ),
 								'caption'     => esc_html__( 'Delete this plugin\'s settings when the plugin is deleted', 'holiday-mode-for-hivepress' ),
-								'description' => esc_html__( 'Leave this unticked unless you are certain. With it ticked, deleting the plugin also removes every setting on this page. It cannot be undone and there is no confirmation step. Either way, deleting the plugin restores every hidden listing to the status it had and switches holiday mode off for everyone, because listings must never be left hidden with no way to bring them back.', 'holiday-mode-for-hivepress' ),
+								'description' => esc_html__( 'With this ticked, deleting the plugin also removes every setting on this page, with no confirmation step and no undo. Either way, deleting restores every hidden listing and switches holiday mode off for everyone.', 'holiday-mode-for-hivepress' ),
 								'type'        => 'checkbox',
 								'_order'      => 10,
 							],
@@ -684,8 +869,56 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		}
 
 		/**
+		 * Checks whether the settings tab being rendered is this plugin's own.
+		 *
+		 * READ THIS BEFORE "FIXING" IT BACK TO $_GET['tab']. The address
+		 * cannot answer the question: HivePress falls back to the FIRST tab
+		 * whenever `tab` is absent
+		 * (`hivepress/includes/components/class-admin.php`,
+		 * `get_settings_tab()`), so `admin.php?page=hp_settings` renders a real
+		 * tab that the address does not name. It is not this plugin's tab
+		 * today, because the fallback is whichever tab sorts first and that is
+		 * a core one - but that is an accident of ordering, not a guarantee,
+		 * and a gate that is only right by accident is the kind that breaks
+		 * when somebody reorders a tab.
+		 *
+		 * The registered fields can answer it. `Admin::register_settings()`
+		 * builds the sections and fields for exactly one tab and calls
+		 * `add_settings_field()` with the prefixed option name (same file,
+		 * :275-325, verified against the installed core 1.7.31), so after
+		 * `admin_init` the `wp_settings_fields` global holds this plugin's
+		 * `hp_holiday_mode_for_hivepress_*` keys on its own tab and on no other
+		 * - the no-tab fallback included.
+		 *
+		 * Timing is the only thing to get right: HivePress registers on
+		 * `admin_init` priority 10, and `admin_enqueue_scripts` fires later,
+		 * from `admin-header.php`. Call this any earlier and it answers false
+		 * and the tab silently loses its assets, which is a worse failure than
+		 * the one it fixes. Full rule: resources/hivepress-settings.md, "The
+		 * tab IS knowable server-side: ask the registered fields".
+		 *
+		 * @return bool
+		 */
+		protected function is_settings_tab() {
+			if ( ! isset( $GLOBALS['wp_settings_fields']['hp_settings'] ) || ! is_array( $GLOBALS['wp_settings_fields']['hp_settings'] ) ) {
+				return false;
+			}
+
+			foreach ( $GLOBALS['wp_settings_fields']['hp_settings'] as $hphm_section ) {
+				foreach ( array_keys( (array) $hphm_section ) as $hphm_field ) {
+					if ( 0 === strpos( (string) $hphm_field, 'hp_holiday_mode_for_hivepress_' ) ) {
+						return true;
+					}
+				}
+			}
+
+			return false;
+		}
+
+		/**
 		 * Loads the WordPress colour picker on the plugin's settings tab and
-		 * attaches it to the four colour fields.
+		 * attaches it to the four colour fields, then dresses the tab itself
+		 * with the shared settings-screen chrome.
 		 *
 		 * Core's Color field is a bare input with no picker of its own, so the
 		 * picker is ours to add. The inline script guards two traps: Iris seeds
@@ -694,21 +927,41 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		 * init and on submit; and the field's server-side pattern rejects
 		 * 3-digit shorthand, so #abc is expanded to #aabbcc before submission.
 		 *
+		 * The chrome - the quick-links anchor nav, the sideways floating Save
+		 * control and the back-to-top button - is copied from the reference
+		 * implementation in Account Menu Enhancer for HivePress, so every
+		 * extension in this family puts the same controls in the same places
+		 * (resources/hivepress-settings.md, "The settings anchor nav: one
+		 * shared marker class"). It has to be added client-side: HivePress
+		 * renders the tab through do_settings_sections(), which prints each
+		 * section as a bare <h2> with no id and no hook between sections
+		 * (`hivepress/templates/admin/settings.php`,
+		 * `components/class-admin.php`), so there is nowhere in PHP to put an
+		 * anchor.
+		 *
+		 * Two gates on the chrome, and neither replaces the other:
+		 * is_settings_tab() decides whether the files load, and the script's
+		 * own `[name^="hp_holiday_mode_for_hivepress_"]` test decides whether
+		 * it acts. Dropping the second would make the chrome depend on this
+		 * enqueue never regressing.
+		 *
 		 * @return void
 		 */
 		public function enqueue_settings_assets() {
 			// Screen detection only, no form data is read or written.
 			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only check of which admin page is rendering.
 			$page = isset( $_GET['page'] ) ? sanitize_key( wp_unslash( $_GET['page'] ) ) : '';
-			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only check of which admin page is rendering.
-			$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : '';
 
-			if ( 'hp_settings' !== $page || self::SETTINGS_TAB !== $tab ) {
+			if ( 'hp_settings' !== $page || ! $this->is_settings_tab() ) {
 				return;
 			}
 
 			wp_enqueue_style( 'wp-color-picker' );
 			wp_enqueue_script( 'wp-color-picker' );
+
+			// The picker previews need the newer icons drawable on this
+			// screen, whatever the site's vendors have chosen so far.
+			$this->enqueue_fontawesome();
 
 			// The submit guard compares values instead of listening for events:
 			// Iris writes palette picks into the input with jQuery .val(),
@@ -738,6 +991,71 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			'});';
 
 			wp_add_inline_script( 'wp-color-picker', $js );
+
+			$hphm_path = plugin_dir_path( __FILE__ );
+			$hphm_url  = plugin_dir_url( __FILE__ );
+
+			// The file time rides along in the version so caches refresh
+			// whenever the file changes.
+			wp_enqueue_style(
+				'hphm-backend',
+				$hphm_url . 'assets/css/backend.css',
+				[],
+				HOLIDAY_MODE_FOR_HIVEPRESS_VERSION . '.' . (int) filemtime( $hphm_path . 'assets/css/backend.css' )
+			);
+
+			wp_enqueue_script(
+				'hphm-backend',
+				$hphm_url . 'assets/js/backend.js',
+				[ 'jquery' ],
+				HOLIDAY_MODE_FOR_HIVEPRESS_VERSION . '.' . (int) filemtime( $hphm_path . 'assets/js/backend.js' ),
+				true
+			);
+
+			wp_localize_script(
+				'hphm-backend',
+				'hphmBackendData',
+				[
+					'labels' => [
+						// The colon is part of the wording: it reads as a
+						// lead-in to the links that follow it, not as a heading
+						// over them.
+						'jumpTo'    => esc_html__( 'Jump to a section:', 'holiday-mode-for-hivepress' ),
+						'save'      => esc_html__( 'Save Changes', 'holiday-mode-for-hivepress' ),
+						'backToTop' => esc_html__( 'Back to top', 'holiday-mode-for-hivepress' ),
+					],
+				]
+			);
+
+			// Core's select2 icon template hardcodes `fas fa-fw fa-<id>`
+			// (`hivepress/assets/js/common.js:233`), which points every
+			// preview at the solid family. Brand glyphs do not exist there,
+			// and the family the Font Awesome 6/7 solid additions resolve to
+			// depends on which stylesheet enqueued last, so these per-icon
+			// rules pin the right family and weight for the added icons. Both
+			// the element and its ::before are targeted because Font Awesome
+			// 7 styles the pseudo-element directly where 5 and 6 style the
+			// element, and all three majors' family names are listed so the
+			// rules hold whichever version the shared handle was registered
+			// with. Preview-only: the front end emits fa-brands/fa-solid
+			// classes and needs none of this.
+			$brand_selectors = [];
+			$solid_selectors = [];
+
+			foreach ( self::ICONS_BRAND as $icon_name ) {
+				$brand_selectors[] = 'i.fa-' . $icon_name;
+				$brand_selectors[] = 'i.fa-' . $icon_name . ':before';
+			}
+
+			foreach ( self::ICONS_SOLID_EXTRA as $icon_name ) {
+				$solid_selectors[] = 'i.fa-' . $icon_name;
+				$solid_selectors[] = 'i.fa-' . $icon_name . ':before';
+			}
+
+			$css  = implode( ',', $brand_selectors ) . '{font-family:"Font Awesome 7 Brands","Font Awesome 6 Brands","Font Awesome 5 Brands" !important;font-weight:400 !important;}';
+			$css .= implode( ',', $solid_selectors ) . '{font-family:"Font Awesome 7 Free","Font Awesome 6 Free","Font Awesome 5 Free" !important;font-weight:900 !important;}';
+
+			wp_add_inline_style( 'wp-color-picker', $css );
 		}
 
 		/* ---------------- Notice customisation ---------------- */
@@ -754,7 +1072,9 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		 * @param string $context Either 'banner' (vendor-facing, account pages)
 		 *                        or 'notice' (public profile).
 		 * @return array `label`, `message`, `icon` (bare Font Awesome name),
-		 *               `label_color`, `text_color` and `icon_color` (6-digit hex).
+		 *               `icon_size` (percentage), `icon_weight` ('', 'semibold'
+		 *               or 'bold'), `label_color`, `text_color` and
+		 *               `icon_color` (6-digit hex).
 		 */
 		public function get_notice_args( $context ) {
 			$context = 'banner' === $context ? 'banner' : 'notice';
@@ -783,6 +1103,12 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				'label'        => $this->get_text_option( $context . '_label', $label ),
 				'message'      => $this->get_text_option( $context . '_message', $message ),
 				'icon'         => $this->get_icon_option( $context . '_icon' ),
+
+				// The built-in sizes are the ones the two renderers carried
+				// as hardcoded percentages before 1.8.0, so a site that never
+				// opens the new fields keeps exactly the look it had.
+				'icon_size'    => $this->get_icon_size_option( $context . '_icon_size', 'banner' === $context ? 130 : 150 ),
+				'icon_weight'  => $this->get_icon_weight_option( $context . '_icon_weight' ),
 				'label_color'  => $label_color,
 				'text_color'   => $this->get_color_option( $context . '_text_color', self::COLOR_DEFAULT ),
 
@@ -871,6 +1197,207 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			}
 
 			return self::ICON_DEFAULT;
+		}
+
+		/**
+		 * Reads an icon size setting, as a percentage of the surrounding text
+		 * size. Blank, absent and out-of-range values all fall back: the
+		 * field says "leave blank for the standard size", and a cleared
+		 * number field stores '' (which a bare int cast would read as 0).
+		 *
+		 * @param string $key      Option key without the plugin prefix.
+		 * @param int    $fallback Size to use when unset or invalid.
+		 * @return int
+		 */
+		private function get_icon_size_option( $key, $fallback ) {
+			$value = get_option( 'hp_holiday_mode_for_hivepress_' . $key );
+
+			if ( is_scalar( $value ) && is_numeric( (string) $value ) ) {
+				$size = (int) $value;
+
+				if ( $size >= 50 && $size <= 400 ) {
+					return $size;
+				}
+			}
+
+			return $fallback;
+		}
+
+		/**
+		 * Reads an icon weight setting. Anything but a known stroke key reads
+		 * as '' (normal), so junk in the row can never reach a style attribute.
+		 *
+		 * @param string $key Option key without the plugin prefix.
+		 * @return string One of '', 'semibold' or 'bold'.
+		 */
+		private function get_icon_weight_option( $key ) {
+			$value = get_option( 'hp_holiday_mode_for_hivepress_' . $key );
+			$value = is_scalar( $value ) ? (string) $value : '';
+
+			return isset( self::ICON_STROKES[ $value ] ) ? $value : '';
+		}
+
+		/**
+		 * Returns the full Font Awesome class list for a validated icon name.
+		 *
+		 * Three shapes on purpose. A brand icon lives in its own font family,
+		 * so it must say `fa-brands`; a Font Awesome 6/7 solid icon says
+		 * `fa-solid`, a class only the plugin's own stylesheet defines; and
+		 * everything else keeps the `fas` class it has always had, rendered
+		 * by the Font Awesome 5 solid stylesheet core enqueues site-wide.
+		 *
+		 * @param string $icon Validated bare icon name.
+		 * @return string
+		 */
+		public function get_icon_class( $icon ) {
+			if ( in_array( $icon, self::ICONS_BRAND, true ) ) {
+				return 'fa-brands fa-' . $icon;
+			}
+
+			if ( in_array( $icon, self::ICONS_SOLID_EXTRA, true ) ) {
+				return 'fa-solid fa-' . $icon;
+			}
+
+			return 'fas fa-' . $icon;
+		}
+
+		/**
+		 * Whether an icon renders only with the plugin's own Font Awesome
+		 * stylesheet: core's Font Awesome 5 solid covers everything else.
+		 *
+		 * @param string $icon Bare icon name.
+		 * @return bool
+		 */
+		public function icon_needs_fontawesome( $icon ) {
+			return in_array( $icon, self::ICONS_BRAND, true ) || in_array( $icon, self::ICONS_SOLID_EXTRA, true );
+		}
+
+		/**
+		 * Returns the inline CSS for an icon weight, or '' for normal.
+		 *
+		 * A text stroke rather than font-weight: the solid font has no
+		 * heavier cut to switch to, and a stroke in currentColor thickens
+		 * the glyph while following the icon colour option. paint-order
+		 * keeps the stroke behind the fill so the shape stays crisp.
+		 *
+		 * @param string $weight One of '', 'semibold' or 'bold'.
+		 * @return string
+		 */
+		public function get_icon_stroke_css( $weight ) {
+			if ( ! isset( self::ICON_STROKES[ $weight ] ) ) {
+				return '';
+			}
+
+			return '-webkit-text-stroke:' . self::ICON_STROKES[ $weight ] . ' currentColor;paint-order:stroke fill;';
+		}
+
+		/**
+		 * Enqueues the shared Font Awesome stylesheet.
+		 *
+		 * Registered under the shared handle only if no other plugin of this
+		 * author's has beaten it to it, so one copy serves them all. Callable
+		 * mid-page: a style enqueued during template render is printed with
+		 * the late styles in the footer.
+		 *
+		 * @return void
+		 */
+		public function enqueue_fontawesome() {
+			if ( ! wp_style_is( self::FONTAWESOME_HANDLE, 'registered' ) ) {
+				/*
+				 * Font Awesome 7.1.0 Free is BUNDLED, in assets/vendor/fontawesome/. Never
+				 * point this at cdnjs or any other CDN. A convenience CDN copy of a library is
+				 * the exact case the offloaded-assets rule exists to catch
+				 * (resources/security-standards.md, "Offloaded assets" - a remote asset is only
+				 * acceptable when it is a service's own required SDK from that service's own
+				 * domain), Plugin Check reported EnqueuedResourceOffloading on every plugin
+				 * that did it, and Chris ruled on 2026-08-30 that the files ship with the
+				 * plugin. It is also faster: cache partitioning (Chrome 86+, Firefox, Safari)
+				 * means a CDN copy is a cold download for every site anyway, plus a DNS lookup
+				 * and TLS handshake to a third origin.
+				 *
+				 * Layout matters. assets/vendor/fontawesome/css/all.min.css sits beside
+				 * assets/vendor/fontawesome/webfonts/, so the stock "../webfonts/" paths inside
+				 * the upstream CSS resolve unchanged. Three faces ship - fa-solid-900.woff2,
+				 * fa-brands-400.woff2 and fa-regular-400.woff2 - and only the v4-compatibility
+				 * @font-face block was removed from the CSS, so nothing can request a file that
+				 * is not there. The regular face is NOT optional, and it costs ~19 KB: with no
+				 * weight-400 face declared the browser silently substitutes the weight-900
+				 * solid one, so a far / fa-regular name draws a FILLED glyph instead of an
+				 * outline. That shipped between 2026-08-29 and 2026-08-30 and read as somebody
+				 * picking the wrong icon rather than as a missing font, which is why it
+				 * survived a whole day.
+				 *
+				 * Pinned to 7.1.0, and every plugin sharing this handle must pin the identical
+				 * version, because only the first registration of a shared handle wins.
+				 * Full rule: resources/hivepress-ui.md, "FA6/7 and brand icons: bundle them,
+				 * never load a CDN copy (2026-08-30)".
+				 */
+				wp_register_style(
+					self::FONTAWESOME_HANDLE,
+					plugin_dir_url( __FILE__ ) . self::FONTAWESOME_PATH,
+					[],
+					self::FONTAWESOME_VERSION
+				);
+			}
+
+			wp_enqueue_style( self::FONTAWESOME_HANDLE );
+		}
+
+		/**
+		 * Enqueues Font Awesome ahead of the banner when its icon needs it.
+		 *
+		 * Mirrors the maybe_print_banner() gates exactly: the stylesheet must
+		 * load precisely when the banner will print with an icon core's Font
+		 * Awesome 5 cannot draw, and at wp_enqueue_scripts time, because the
+		 * banner itself prints after the late-styles cutoff.
+		 *
+		 * @return void
+		 */
+		public function maybe_enqueue_fontawesome() {
+			if ( ! is_user_logged_in() ) {
+				return;
+			}
+
+			$user_id = get_current_user_id();
+
+			if ( ! get_user_meta( $user_id, self::USER_META_KEY, true ) ) {
+				return;
+			}
+
+			if ( ! $this->is_user_vendor( $user_id ) ) {
+				return;
+			}
+
+			if ( $this->icon_needs_fontawesome( $this->get_notice_args( 'banner' )['icon'] ) ) {
+				$this->enqueue_fontawesome();
+			}
+		}
+
+		/**
+		 * Replaces the %username% token in notice text with the vendor's
+		 * display name.
+		 *
+		 * Resolved at render time, against the vendor the notice is about, so
+		 * one stored template serves every vendor. The result is plain text
+		 * only: both callers escape it on output (esc_html on the profile
+		 * notice, JSON plus createTextNode in the banner), so a display name
+		 * can never carry markup into the page.
+		 *
+		 * @param string $text    Text that may contain the token.
+		 * @param int    $user_id The vendor whose display name to use.
+		 * @return string
+		 */
+		public function apply_username_token( $text, $user_id ) {
+			$text = (string) $text;
+
+			if ( false === strpos( $text, '%username%' ) ) {
+				return $text;
+			}
+
+			$user = get_userdata( (int) $user_id );
+			$name = $user && isset( $user->display_name ) ? (string) $user->display_name : '';
+
+			return str_replace( '%username%', $name, $text );
 		}
 
 		/* ---------------- UI: field ---------------- */
@@ -1746,6 +2273,15 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				$prev = get_post_meta( $listing_id, self::LISTING_META_PREV, true );
 				$curr = get_post_status( $listing_id );
 
+				// phpcs:disable Squiz.PHP.CommentedOutCode -- The block below is prose, not code.
+				// The sniff scores it 53% "valid code" because it is long and full of bare words
+				// that tokenise as T_STRING. Rewording was tried on 2026-08-30 (the semicolon on
+				// the first line replaced with a full stop, the obvious code-like token) and the
+				// score did not move at all, so chasing the heuristic would mean degrading a
+				// comment that earns its place: it records why restoring reads the listing's own
+				// recorded status instead of re-running the owner's current setting, which is the
+				// difference between a vendor coming back to their listings and coming back to
+				// listings stranded as drafts with nothing left saying what they were.
 				// Hiding asks the owner's current Statuses to Hide setting;
 				// restoring asks the listing. The two must never share one
 				// list. Were this test written against the hide list instead,
@@ -1758,6 +2294,7 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				// safe thing to restore into is the status the listing
 				// actually had, so the test below is a sanity check on that
 				// recorded value, never a re-run of today's setting.
+				// phpcs:enable Squiz.PHP.CommentedOutCode
 				if ( 'draft' === $curr && $this->is_restorable_status( $prev ) ) {
 					// A listing whose own paid period ran out while it was hidden stays hidden,
 					// because holiday mode must never buy a listing extra time. Counted separately
@@ -2108,21 +2645,24 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 
 			$data = [
 				'url'         => $this->get_account_settings_url(),
-				'title'       => $args['label'],
-				'message'     => $args['message'],
-				'icon'        => $args['icon'],
+				'title'       => $this->apply_username_token( $args['label'], $user_id ),
+				'message'     => $this->apply_username_token( $args['message'], $user_id ),
+				'iconClass'   => $this->get_icon_class( $args['icon'] ),
+				'iconSize'    => (int) $args['icon_size'],
+				'iconStroke'  => $this->get_icon_stroke_css( $args['icon_weight'] ),
 				'iconColor'   => $args['icon_color'],
 				'labelColor'  => $args['label_color'],
 				'textColor'   => $args['text_color'],
 				'bgColor'     => $args['bg_color'],
 				'borderColor' => $args['border_color'],
 				'link'        => __( 'Account → Settings', 'holiday-mode-for-hivepress' ),
-				'dismiss'     => __( 'Dismiss', 'holiday-mode-for-hivepress' ),
 			];
 
-			// The icon name and colours are validated server-side (plain
-			// icon-name shape, 6-digit hex) before they are JSON-encoded, so
-			// they are safe inside className and cssText below.
+			// The icon class, size, stroke and colours are validated or built
+			// server-side (whitelisted class prefixes on a plain icon-name
+			// shape, an integer, a fixed stroke-CSS map, 6-digit hex) before
+			// they are JSON-encoded, so they are safe inside className and
+			// cssText below.
 			$js = '(function(){try{' .
 				'if(!document.body.classList.contains("hp-template--user-account-page")){return;}' .
 				'if(document.getElementById("holiday-mode-for-hivepress-banner")){return;}' .
@@ -2134,9 +2674,9 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				'banner.setAttribute("aria-live","polite");' .
 				'banner.style.cssText="position:sticky;top:0.5rem;z-index:9999;box-sizing:border-box;max-width:100%;background:"+d.bgColor+";color:"+d.textColor+";border:1px solid "+d.borderColor+";border-radius:0.5rem;padding:0.75rem 1rem;margin-bottom:1rem;display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,.05)";' .
 				'var icon=document.createElement("i");' .
-				'icon.className="fas fa-"+d.icon;' .
+				'icon.className=d.iconClass;' .
 				'icon.setAttribute("aria-hidden","true");' .
-				'icon.style.cssText="color:"+d.iconColor+";font-size:130%;line-height:1";' .
+				'icon.style.cssText="color:"+d.iconColor+";font-size:"+d.iconSize+"%;line-height:1;"+d.iconStroke;' .
 				'var strong=document.createElement("strong");' .
 				'strong.style.color=d.labelColor;' .
 				'strong.appendChild(document.createTextNode(d.title));' .
@@ -2150,13 +2690,12 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				'span.appendChild(a);' .
 				'span.appendChild(document.createTextNode(parts[1]||""));' .
 				'}' .
-				'var btn=document.createElement("button");' .
-				'btn.type="button";' .
-				'btn.setAttribute("aria-label",d.dismiss);' .
-				'btn.style.cssText="margin-left:auto;cursor:pointer;background:transparent;border:0;color:inherit;font-size:120%;line-height:1";' .
-				'btn.appendChild(document.createTextNode("×"));' .
-				'btn.addEventListener("click",function(){if(banner.parentNode){banner.parentNode.removeChild(banner);}});' .
-				'banner.appendChild(icon);banner.appendChild(strong);banner.appendChild(span);banner.appendChild(btn);' .
+				// Deliberately no dismiss control since 1.8.0: the banner is
+				// the only reminder that every listing is hidden, and a
+				// dismissed reminder plus a quiet dashboard reads as "my
+				// listings are live". The way to remove it is the switch it
+				// links to.
+				'banner.appendChild(icon);banner.appendChild(strong);banner.appendChild(span);' .
 				'if(target.firstChild){target.insertBefore(banner,target.firstChild);}else{target.appendChild(banner);}' .
 				'}catch(e){}})();';
 
@@ -2192,7 +2731,10 @@ if ( ! function_exists( 'holiday_mode_for_hivepress_vendor_notice' ) ) {
 	 * An information box (icon, bold label, message) inline-styled with rem
 	 * spacing and percentage font sizes, so it scales with every theme and
 	 * ships no stylesheet. Core enqueues Font Awesome 5 solid site-wide, so
-	 * the icon font is always available on the front end.
+	 * the `fas` icons are always available on the front end; the newer solid
+	 * icons and the brand icons need the plugin's own stylesheet, which is
+	 * enqueued below the moment such an icon is about to render (this runs
+	 * mid-page, early enough for the late-styles pass to print it).
 	 *
 	 * @param int $user_id The vendor's user ID.
 	 * @return string
@@ -2223,12 +2765,13 @@ if ( ! function_exists( 'holiday_mode_for_hivepress_vendor_notice' ) ) {
 		/**
 		 * Filters the public vendor-away notice. Return an empty value to
 		 * remove the notice entirely. Keys: `title` (the bold label),
-		 * `message` (the text under it), `icon` (bare Font Awesome name)
-		 * and `label_color` / `text_color` / `icon_color` / `bg_color`
-		 * (6-digit hex; the border is derived from the background). The
-		 * values already reflect any admin customisation from the settings
-		 * tab, and the vendor's own away message where the site owner has
-		 * enabled vendor messages.
+		 * `message` (the text under it), `icon` (bare Font Awesome name),
+		 * `icon_size` (percentage of the surrounding text), `icon_weight`
+		 * ('', 'semibold' or 'bold') and `label_color` / `text_color` /
+		 * `icon_color` / `bg_color` (6-digit hex; the border is derived from
+		 * the background). The values already reflect any admin customisation
+		 * from the settings tab, and the vendor's own away message where the
+		 * site owner has enabled vendor messages.
 		 *
 		 * @param array $notice  Notice arguments.
 		 * @param int   $user_id The vendor's user ID.
@@ -2239,6 +2782,8 @@ if ( ! function_exists( 'holiday_mode_for_hivepress_vendor_notice' ) ) {
 				'title'       => $defaults['label'],
 				'message'     => $defaults['message'],
 				'icon'        => $defaults['icon'],
+				'icon_size'   => $defaults['icon_size'],
+				'icon_weight' => $defaults['icon_weight'],
 				'label_color' => $defaults['label_color'],
 				'text_color'  => $defaults['text_color'],
 				'icon_color'  => $defaults['icon_color'],
@@ -2251,10 +2796,22 @@ if ( ! function_exists( 'holiday_mode_for_hivepress_vendor_notice' ) ) {
 			return '';
 		}
 
-		// The filter can return anything, and the icon and colours land in
-		// class and style attributes, so validate them again here rather
-		// than trusting the save-time checks.
+		// The filter can return anything, and the icon, size, weight and
+		// colours land in class and style attributes, so validate them again
+		// here rather than trusting the save-time checks.
 		$icon = isset( $notice['icon'] ) && preg_match( '/^[a-z0-9-]+$/', (string) $notice['icon'] ) ? (string) $notice['icon'] : Holiday_Mode_For_HivePress::ICON_DEFAULT;
+
+		$icon_size = isset( $notice['icon_size'] ) && is_numeric( (string) $notice['icon_size'] ) && (int) $notice['icon_size'] >= 50 && (int) $notice['icon_size'] <= 400 ? (int) $notice['icon_size'] : 150;
+
+		// get_icon_stroke_css() whitelists the weight itself, so an unknown
+		// value simply produces no stroke.
+		$icon_stroke = $plugin->get_icon_stroke_css( isset( $notice['icon_weight'] ) && is_scalar( $notice['icon_weight'] ) ? (string) $notice['icon_weight'] : '' );
+
+		// A brand or Font Awesome 6/7 icon renders blank under core's Font
+		// Awesome 5 stylesheet, so the plugin's own goes out with this page.
+		if ( $plugin->icon_needs_fontawesome( $icon ) ) {
+			$plugin->enqueue_fontawesome();
+		}
 
 		$label_color = isset( $notice['label_color'] ) && preg_match( '/^#[0-9a-fA-F]{6}$/', (string) $notice['label_color'] ) ? (string) $notice['label_color'] : Holiday_Mode_For_HivePress::COLOR_DEFAULT;
 
@@ -2266,9 +2823,21 @@ if ( ! function_exists( 'holiday_mode_for_hivepress_vendor_notice' ) ) {
 
 		$border_color = $plugin->get_border_color( $bg_color );
 
+		// The %username% token is resolved last, after the settings, the
+		// vendor's own message and the filter have all had their say, so it
+		// works wherever the wording came from. Both strings are escaped on
+		// output below.
+		if ( isset( $notice['title'] ) ) {
+			$notice['title'] = $plugin->apply_username_token( $notice['title'], $user_id );
+		}
+
+		if ( isset( $notice['message'] ) ) {
+			$notice['message'] = $plugin->apply_username_token( $notice['message'], $user_id );
+		}
+
 		$output = '<div class="holiday-mode-for-hivepress-vendor-notice" role="status" style="display:flex;align-items:flex-start;gap:0.75rem;box-sizing:border-box;background:' . esc_attr( $bg_color ) . ';border:1px solid ' . esc_attr( $border_color ) . ';border-radius:0.5rem;padding:1rem;margin:0 0 2rem;">';
 
-		$output .= '<i class="fas fa-' . esc_attr( $icon ) . '" aria-hidden="true" style="color:' . esc_attr( $icon_color ) . ';font-size:150%;line-height:1.4;"></i>';
+		$output .= '<i class="' . esc_attr( $plugin->get_icon_class( $icon ) ) . '" aria-hidden="true" style="' . esc_attr( 'color:' . $icon_color . ';font-size:' . $icon_size . '%;line-height:1.4;' . $icon_stroke ) . '"></i>';
 
 		$output .= '<div>';
 

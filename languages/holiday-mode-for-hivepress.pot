@@ -2,14 +2,14 @@
 # This file is distributed under the GPL-2.0-or-later.
 msgid ""
 msgstr ""
-"Project-Id-Version: Holiday Mode for HivePress 1.7.6\n"
+"Project-Id-Version: Holiday Mode for HivePress 1.8.2\n"
 "Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/holiday-mode-for-hivepress\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"POT-Creation-Date: 2026-08-24T13:21:53+00:00\n"
+"POT-Creation-Date: 2026-08-30T17:03:05+00:00\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "X-Generator: WP-CLI 2.12.0\n"
 "X-Domain: holiday-mode-for-hivepress\n"
@@ -39,317 +39,373 @@ msgstr ""
 msgid "https://community.hivepress.io/u/chrisb/summary"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:374
+#: holiday-mode-for-hivepress.php:477
 msgid "Pick a colour or paste a 6-digit hex code such as #31708f. Leave blank to use the standard blue."
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:376
+#: holiday-mode-for-hivepress.php:479
 msgid "Pick a colour or paste a 6-digit hex code such as #31708f. Leave blank to match the label colour."
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:394
-msgid "Pick a colour or paste a 6-digit hex code such as #d9edf7. Leave blank to use the standard light blue. The border shades itself to match, and if you choose a dark background, set the label and text colours to something light."
+#: holiday-mode-for-hivepress.php:497
+msgid "Pick a colour or paste a 6-digit hex code such as #d9edf7. Leave blank to use the standard light blue. The border shades itself to match; with a dark background, choose light label and text colours."
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:404
+#: holiday-mode-for-hivepress.php:507
 msgid "Vendors and anyone with a listing (recommended)"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:405
+#: holiday-mode-for-hivepress.php:508
 msgid "Vendors only"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:406
+#: holiday-mode-for-hivepress.php:509
 msgid "Chosen roles"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:443
+#. translators: %s: the brand icon's name.
+#: holiday-mode-for-hivepress.php:564
+#, php-format
+msgid "%s (brand)"
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:569
+msgid "Size as a percentage of the surrounding text, between 50 and 400. Leave blank for the standard size."
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:575
+msgid "Normal"
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:576
+msgid "Semi-bold"
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:577
+msgid "Bold"
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:580
+msgid "Draws a slightly heavier outline in the icon colour. Normal leaves the icon as the font draws it."
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:583
 msgid "Holiday Mode"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:448
+#: holiday-mode-for-hivepress.php:588
 msgid "Who Can Use Holiday Mode"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:449
+#: holiday-mode-for-hivepress.php:589
 msgid "Administrators always see the switch, whichever choice you make here, so you can try it on your own account."
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:454
+#: holiday-mode-for-hivepress.php:594
 msgid "Offer the Switch To"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:455
-msgid "Leave this alone unless you have a reason to narrow it. Vendors and anyone with a listing is how the plugin has always behaved: a user counts if HivePress has given them a vendor profile, or if they have written at least one listing in any status. Vendors only drops that second half, so somebody whose listing is still unfinished does not get the switch until HivePress has made them a vendor. Chosen roles ignores both tests and goes purely by the roles you tick below."
+#: holiday-mode-for-hivepress.php:595
+msgid "Vendors and anyone with a listing is the standard behaviour. Vendors only requires a HivePress vendor profile. Chosen roles goes purely by the roles you tick below."
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:462
+#: holiday-mode-for-hivepress.php:602
 msgid "Chosen Roles"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:463
-msgid "Read only when the choice above is set to chosen roles, and ignored entirely otherwise. A user holding any one of the ticked roles is offered the switch. Tick nothing and nobody but an administrator is, which is worth knowing before you set the choice above and walk away."
+#: holiday-mode-for-hivepress.php:603
+msgid "Read only when the choice above is Chosen roles. A user holding any ticked role is offered the switch; tick nothing and only administrators are."
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:472
+#: holiday-mode-for-hivepress.php:612
 msgid "Vendor Banner"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:473
-msgid "This banner appears at the top of the account pages, but only for a vendor whose own holiday mode is switched on. It reminds them that their listings are currently hidden. Leave any field blank to use the standard design."
+#: holiday-mode-for-hivepress.php:613
+msgid "Shown at the top of the account pages for a vendor whose own holiday mode is on, reminding them their listings are hidden. Leave any field blank to use the standard design."
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:478
+#: holiday-mode-for-hivepress.php:618
 msgid "Banner Label"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:479
-msgid "The short bold text at the start of the banner. Leave blank to use the standard wording."
+#. translators: %username% is typed literally by the site owner; it is replaced with the vendor's display name.
+#: holiday-mode-for-hivepress.php:620
+#, php-format
+msgid "The short bold text at the start of the banner. Leave blank to use the standard wording. %username% shows the vendor's display name."
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:480
-#: holiday-mode-for-hivepress.php:763
+#: holiday-mode-for-hivepress.php:621
+#: holiday-mode-for-hivepress.php:1083
 msgid "Holiday mode is active."
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:488
+#: holiday-mode-for-hivepress.php:629
 msgid "Banner Message"
 msgstr ""
 
-#. translators: %s is typed literally by the site owner; it marks where the account settings link goes in the banner.
-#: holiday-mode-for-hivepress.php:490
+#. translators: %s and %username% are typed literally by the site owner; %s marks where the account settings link goes and %username% is replaced with the vendor's display name.
+#: holiday-mode-for-hivepress.php:631
 #, php-format
-msgid "The sentence after the label. Type %s where the link to the account settings page should appear. Leave blank to use the standard wording."
+msgid "The sentence after the label. Type %s where the link to the account settings page should appear. Leave blank to use the standard wording. %username% shows the vendor's display name."
 msgstr ""
 
 #. translators: %s is the linked "Account → Settings" text.
-#: holiday-mode-for-hivepress.php:492
-#: holiday-mode-for-hivepress.php:766
+#: holiday-mode-for-hivepress.php:633
+#: holiday-mode-for-hivepress.php:1086
 #, php-format
 msgid "Your listings are hidden from visitors until you switch it off in %s."
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:500
+#: holiday-mode-for-hivepress.php:641
 msgid "Banner Icon"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:501
-msgid "The icon shown at the start of the banner. Leave empty to use the information icon."
+#: holiday-mode-for-hivepress.php:642
+msgid "The icon shown at the start of the banner. Leave empty to use the information icon. Brand icons are marked in the list."
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:508
+#: holiday-mode-for-hivepress.php:652
+msgid "Banner Icon Size"
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:662
+msgid "Banner Icon Weight"
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:670
 msgid "Banner Icon Colour"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:518
+#: holiday-mode-for-hivepress.php:680
 msgid "Banner Label Colour"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:528
+#: holiday-mode-for-hivepress.php:690
 msgid "Banner Text Colour"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:538
+#: holiday-mode-for-hivepress.php:700
 msgid "Banner Background Colour"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:550
+#: holiday-mode-for-hivepress.php:712
 msgid "Profile Notice"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:551
-msgid "This notice appears on a vendor's public profile while their holiday mode is switched on. It replaces the listings heading and the listings area, so visitors know the vendor is away rather than gone."
+#: holiday-mode-for-hivepress.php:713
+msgid "Shown on a vendor's public profile while their holiday mode is on, replacing the listings area so visitors know the vendor is away rather than gone."
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:556
+#: holiday-mode-for-hivepress.php:718
 msgid "Vendor Messages"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:557
+#: holiday-mode-for-hivepress.php:719
 msgid "Let each vendor write their own away message"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:558
-msgid "With this ticked, two extra fields appear under the Holiday mode switch in each vendor's account settings: a headline and a short explanation. A vendor's own words then replace the label and message below on their profile, keeping the same icon and colours. Vendors who leave them blank get the notice configured here."
+#: holiday-mode-for-hivepress.php:720
+msgid "Adds headline and message fields to each vendor's account settings. A vendor's own words then replace the label and message below on their profile; blank fields fall back to the notice configured here."
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:564
+#: holiday-mode-for-hivepress.php:726
 msgid "Notice Label"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:565
-msgid "The short bold heading of the notice. Leave blank to use the standard wording."
+#. translators: %username% is typed literally by the site owner; it is replaced with the vendor's display name.
+#: holiday-mode-for-hivepress.php:728
+#, php-format
+msgid "The short bold heading of the notice. Leave blank to use the standard wording. %username% shows the vendor's display name."
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:566
-#: holiday-mode-for-hivepress.php:768
+#: holiday-mode-for-hivepress.php:729
+#: holiday-mode-for-hivepress.php:1088
 msgid "On holiday"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:574
+#: holiday-mode-for-hivepress.php:737
 msgid "Notice Message"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:575
-msgid "The text under the heading. Leave blank to use the standard wording, which mentions messaging only when the Messages extension is active."
+#. translators: %username% is typed literally by the site owner; it is replaced with the vendor's display name.
+#: holiday-mode-for-hivepress.php:739
+#, php-format
+msgid "The text under the heading. Leave blank to use the standard wording, which mentions messaging only when the Messages extension is active. %username% shows the vendor's display name."
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:576
-#: holiday-mode-for-hivepress.php:775
+#: holiday-mode-for-hivepress.php:740
+#: holiday-mode-for-hivepress.php:1095
 msgid "This user is on holiday at the moment. You can still send them a message, but they may take longer than usual to reply."
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:584
+#: holiday-mode-for-hivepress.php:748
 msgid "Notice Icon"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:585
-msgid "The icon shown at the start of the notice. Leave empty to use the information icon."
+#: holiday-mode-for-hivepress.php:749
+msgid "The icon shown at the start of the notice. Leave empty to use the information icon. Brand icons are marked in the list."
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:592
-msgid "Notice Icon Colour"
-msgstr ""
-
-#: holiday-mode-for-hivepress.php:602
-msgid "Notice Label Colour"
-msgstr ""
-
-#: holiday-mode-for-hivepress.php:612
-msgid "Notice Text Colour"
-msgstr ""
-
-#: holiday-mode-for-hivepress.php:622
-msgid "Notice Background Colour"
-msgstr ""
-
-#: holiday-mode-for-hivepress.php:634
-msgid "Hiding Listings"
-msgstr ""
-
-#: holiday-mode-for-hivepress.php:635
-msgid "Holiday mode only ever touches listings in the statuses ticked below. Anything else, including a vendor's own unfinished listings and anything in the bin, is left exactly where it is."
-msgstr ""
-
-#: holiday-mode-for-hivepress.php:640
-msgid "Statuses to Hide"
-msgstr ""
-
-#: holiday-mode-for-hivepress.php:641
-msgid "Leave all four ticked unless you have a reason not to. Narrowing this changes only what a future holiday hides: listings already hidden still come back to the status they actually had, so nothing a vendor is away on is stranded by a change made here. Unticking every box is read as all four, because a holiday mode that hides nothing would be a switch that does nothing."
-msgstr ""
-
-#: holiday-mode-for-hivepress.php:650
-msgid "Restoring Listings"
-msgstr ""
-
-#: holiday-mode-for-hivepress.php:651
-msgid "Holiday mode brings a vendor's listings back when they switch it off. This section decides whether a lapsed HivePress Membership is allowed to stand in the way."
-msgstr ""
-
-#: holiday-mode-for-hivepress.php:656
-msgid "Membership Required to Restore"
-msgstr ""
-
-#: holiday-mode-for-hivepress.php:657
-msgid "Ask a vendor to renew a lapsed membership before their listings come back"
-msgstr ""
-
-#: holiday-mode-for-hivepress.php:658
-msgid "Leave this unticked unless you deliberately want that gate. With it ticked, a vendor whose HivePress Membership has lapsed cannot switch holiday mode off: they are asked to renew first, and their listings stay hidden until they do. It has any effect at all only where HivePress Memberships is active and membership restrictions cover listings. Bear in mind that HivePress leaves a vendor's already published listings visible when their membership lapses, so ticking this asks something of a vendor who used holiday mode that is asked of nobody else."
-msgstr ""
-
-#: holiday-mode-for-hivepress.php:666
-msgid "Removing the Plugin"
-msgstr ""
-
-#: holiday-mode-for-hivepress.php:667
-msgid "Your settings are kept if you delete this plugin, so you can reinstall it and carry on. WordPress shows its own warning on the delete screen saying the data goes too, but that warning is the same for every plugin and does not apply here unless you tick the box below. Switching the plugin off never removes anything, and deleting it always brings hidden listings back first."
-msgstr ""
-
-#: holiday-mode-for-hivepress.php:672
-msgid "Delete All Data"
-msgstr ""
-
-#: holiday-mode-for-hivepress.php:673
-msgid "Delete this plugin's settings when the plugin is deleted"
-msgstr ""
-
-#: holiday-mode-for-hivepress.php:674
-msgid "Leave this unticked unless you are certain. With it ticked, deleting the plugin also removes every setting on this page. It cannot be undone and there is no confirmation step. Either way, deleting the plugin restores every hidden listing to the status it had and switches holiday mode off for everyone, because listings must never be left hidden with no way to bring them back."
+#: holiday-mode-for-hivepress.php:759
+msgid "Notice Icon Size"
 msgstr ""
 
 #: holiday-mode-for-hivepress.php:769
+msgid "Notice Icon Weight"
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:777
+msgid "Notice Icon Colour"
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:787
+msgid "Notice Label Colour"
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:797
+msgid "Notice Text Colour"
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:807
+msgid "Notice Background Colour"
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:819
+msgid "Hiding Listings"
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:820
+msgid "Holiday mode only ever touches listings in the statuses ticked below. Anything else, including unfinished listings and the bin, is left alone."
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:825
+msgid "Statuses to Hide"
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:826
+msgid "Narrowing this changes only what a future holiday hides: listings already hidden still come back to the status they had. Unticking every box is read as all four."
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:835
+msgid "Restoring Listings"
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:836
+msgid "Listings come back when a vendor switches holiday mode off. This section decides whether a lapsed HivePress Membership is allowed to stand in the way."
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:841
+msgid "Membership Required to Restore"
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:842
+msgid "Ask a vendor to renew a lapsed membership before their listings come back"
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:843
+msgid "With this ticked, a vendor whose HivePress Membership has lapsed must renew before their listings come back. It only takes effect where HivePress Memberships is active and covers listings. Leave unticked unless you deliberately want that gate."
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:851
+msgid "Removing the Plugin"
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:852
+msgid "Your settings are kept if you delete this plugin, whatever the delete screen's generic warning says, unless you tick the box below. Deleting the plugin always brings hidden listings back first."
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:857
+msgid "Delete All Data"
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:858
+msgid "Delete this plugin's settings when the plugin is deleted"
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:859
+msgid "With this ticked, deleting the plugin also removes every setting on this page, with no confirmation step and no undo. Either way, deleting restores every hidden listing and switches holiday mode off for everyone."
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:1023
+msgid "Jump to a section:"
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:1024
+msgid "Save Changes"
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:1025
+msgid "Back to top"
+msgstr ""
+
+#: holiday-mode-for-hivepress.php:1089
 msgid "This user is on holiday at the moment, so their listings are hidden until they return."
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:918
+#: holiday-mode-for-hivepress.php:1445
 msgid "Turn this on to hide all of your listings until you switch it off."
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:921
+#: holiday-mode-for-hivepress.php:1448
 msgid "Your listings are restored when you switch it off, as long as your membership is active at that time."
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:925
+#: holiday-mode-for-hivepress.php:1452
 msgid "Holiday mode (hide all listings)"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:926
+#: holiday-mode-for-hivepress.php:1453
 msgid "Hide all of my listings while I am away"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:957
+#: holiday-mode-for-hivepress.php:1484
 msgid "Away message headline"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:958
+#: holiday-mode-for-hivepress.php:1485
 msgid "Shown on your public profile while holiday mode is on. Leave blank to use the site's standard message."
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:969
+#: holiday-mode-for-hivepress.php:1496
 msgid "Away message text"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:970
+#: holiday-mode-for-hivepress.php:1497
 msgid "The sentence or two under the headline. Leave blank to use the site's standard message."
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:1389
+#: holiday-mode-for-hivepress.php:1916
 msgid "Holiday mode"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:1419
+#: holiday-mode-for-hivepress.php:1946
 msgid "This listing is restored automatically when the vendor switches holiday mode off."
 msgstr ""
 
 #. translators: %s: the status the listing returns to when holiday mode is switched off.
-#: holiday-mode-for-hivepress.php:1422
+#: holiday-mode-for-hivepress.php:1949
 #, php-format
 msgid "Hidden (was %s)"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:1905
+#: holiday-mode-for-hivepress.php:2477
 msgid "Your membership is not active, so holiday mode cannot be switched off yet and your listings stay hidden. Please renew your membership to restore them."
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:1947
+#: holiday-mode-for-hivepress.php:2519
 msgid "Holiday mode cannot be switched off yet, so your listings stay hidden. Please contact the site owner to restore them."
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:2084
+#: holiday-mode-for-hivepress.php:2658
 msgid "Account → Settings"
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:2085
-msgid "Dismiss"
-msgstr ""
-
-#: holiday-mode-for-hivepress.php:2288
+#: holiday-mode-for-hivepress.php:2892
 msgid "Holiday Mode for HivePress requires HivePress to be installed and active."
 msgstr ""
 
-#: holiday-mode-for-hivepress.php:2314
+#: holiday-mode-for-hivepress.php:2918
 msgid "Donate"
 msgstr ""
 
