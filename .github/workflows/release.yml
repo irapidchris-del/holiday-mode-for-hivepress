@@ -26,7 +26,7 @@ jobs:
         run: |
           mkdir -p build/holiday-mode-for-hivepress
           cp holiday-mode-for-hivepress.php readme.txt uninstall.php build/holiday-mode-for-hivepress/
-          cp -r includes languages build/holiday-mode-for-hivepress/
+          cp -r includes assets languages build/holiday-mode-for-hivepress/
           cd build
           zip -r holiday-mode-for-hivepress.zip holiday-mode-for-hivepress
 
