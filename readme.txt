@@ -292,6 +292,8 @@ is hidden and returns when it is restored.
   button and the back-to-top button now look and sit exactly the same in every one of these
   extensions, so moving between two of their settings tabs no longer means hunting for the same
   control in a different place.
+* Changed - the hover tooltips on the settings screen are wider, so a two-sentence explanation
+  reads as a few short lines rather than a tall narrow ribbon of text.
 
 = 1.8.1 =
 * Housekeeping only - the icon library added in 1.8.0 shipped without its outline face, so an
