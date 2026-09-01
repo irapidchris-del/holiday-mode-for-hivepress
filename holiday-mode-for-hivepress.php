@@ -3,7 +3,7 @@
  * Plugin Name:       Holiday Mode for HivePress
  * Plugin URI:        https://github.com/irapidchris-del/holiday-mode-for-hivepress
  * Description:       Holiday Mode toggle that hides and restores all of a vendor's listings, with an on-site banner while active and an away notice on the vendor's public profile. Restoring respects each listing's own expiry date, so a holiday never buys a listing extra visible time.
- * Version:           1.8.2
+ * Version:           1.8.9
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Requires Plugins:  hivepress
@@ -35,10 +35,27 @@ if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_REPO' ) ) {
 
 // Keep in step with the Version header above on every release.
 if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION' ) ) {
-	define( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION', '1.8.2' );
+	define( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION', '1.8.9' );
 }
 
 require_once __DIR__ . '/includes/class-hphm-updater.php';
+
+/*
+ * FAFH (Font Awesome For HivePress) -- the shared icon library, BUNDLED in
+ * includes/fafh/ rather than installed separately, so this plugin still works
+ * on its own. Sibling plugins each register their copy and the highest version
+ * runs; see includes/fafh/class-fafh-loader.php.
+ *
+ * It gives the picker every Font Awesome 7.1.0 Free icon (1,918, brands
+ * included) and draws the chosen one as inline SVG, so the front end loads no
+ * icon stylesheet and no webfont. The plugin's own assets/vendor/fontawesome/
+ * copy was deleted when this landed; the webfont now lives inside the library
+ * and is enqueued in wp-admin only, for the picker previews.
+ *
+ * Never edit includes/fafh/ in place. Edit tools/fafh/ and run
+ * tools\sync-fafh.ps1, which keeps every copy byte-identical.
+ */
+require_once __DIR__ . '/includes/fafh/bootstrap.php';
 
 if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 
@@ -86,6 +103,16 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		 * default since 1.7.6; see get_entitlement() for why.
 		 */
 		const REQUIRE_MEMBERSHIP_OPTION = 'hp_holiday_mode_for_hivepress_require_membership';
+
+		/**
+		 * Membership plans the restore gate applies to. Added 1.8.9.
+		 *
+		 * EMPTY MEANS THE GATE IS OFF, not "every plan". Chris chose that on
+		 * 2026-09-01: the gate has been opt-in and off by default since 1.7.6, so
+		 * almost nobody has it on, and a setting that silently applied to every
+		 * plan the moment it was left blank would be the surprising reading.
+		 */
+		const MEMBERSHIP_PLANS_OPTION = 'hp_holiday_mode_for_hivepress_membership_plans';
 
 		/**
 		 * Option choosing who is offered the holiday mode switch, plus the
@@ -164,12 +191,13 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		 * purpose: each one registers it only if no other already has, so one
 		 * copy serves however many are active.
 		 *
-		 * The path is relative to this file and the files are BUNDLED - see
-		 * enqueue_fontawesome() below for why a CDN URL must never go here.
+		 * FONTAWESOME_VERSION was removed on 2026-09-01: it pinned a bundled
+		 * webfont that no longer exists, FAFH 1.2.0 having replaced it with an
+		 * admin shim. The handle is kept because sibling plugins and third-party
+		 * code may still test for it, and because leaving one plugin free to
+		 * re-register it would undo the shared-handle convention.
 		 */
-		const FONTAWESOME_HANDLE  = 'freestylr-fontawesome';
-		const FONTAWESOME_VERSION = '7.1.0';
-		const FONTAWESOME_PATH    = 'assets/vendor/fontawesome/css/all.min.css';
+		const FONTAWESOME_HANDLE = 'fafh-fontawesome';
 
 		/**
 		 * Solid icons offered on top of core's Font Awesome 5 picker list.
@@ -549,22 +577,45 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			// extended here; the data-template attribute set on each icon
 			// field below is what that resolver would have set, and is what
 			// keeps the select2 icon previews working.
+			// Every Font Awesome 7.1.0 Free icon, brands included, from the
+			// shared FAFH library rather than a list maintained here.
+			// FAFH::choices() is already sorted by label, and its keys are
+			// canonical FA7 names, so a value saved under an older FA5 name
+			// still resolves when it is rendered.
+			// The pickers load their options over AJAX from FAFH rather than
+			// printing them. All 1,918 icons stay reachable by typing, and
+			// FAFH::filter_field_options() puts the saved icon back so each
+			// control still shows what is chosen. Printing 1,918 options per
+			// picker is what turned these settings forms into megabytes of HTML.
+			// The string preset name, not a resolved array: with a source set,
+			// core reads this argument as a preset NAME and passes it to
+			// get_config(), which fatals on an array. FAFH's own filter then
+			// replaces core's resolved list with just the saved icon.
 			$icon_options = [];
+			$icon_source  = '';
 
-			if ( function_exists( 'hivepress' ) ) {
-				$icon_options = (array) hivepress()->get_config( 'icons' );
+			if ( class_exists( 'FAFH' ) ) {
+				$icon_source  = FAFH::picker_source();
+				$icon_options = 'icons';
+			} else {
+				// Fallback: exactly the pre-FAFH list, so a site where the
+				// library failed to load still offers what it always did
+				// rather than silently losing the brand and FA6/7 choices.
+				if ( function_exists( 'hivepress' ) ) {
+					$icon_options = (array) hivepress()->get_config( 'icons' );
+				}
+
+				foreach ( self::ICONS_SOLID_EXTRA as $icon_name ) {
+					$icon_options[ $icon_name ] = $icon_name;
+				}
+
+				foreach ( self::ICONS_BRAND as $icon_name ) {
+					/* translators: %s: the brand icon's name. */
+					$icon_options[ $icon_name ] = sprintf( esc_html__( '%s (brand)', 'holiday-mode-for-hivepress' ), $icon_name );
+				}
+
+				ksort( $icon_options );
 			}
-
-			foreach ( self::ICONS_SOLID_EXTRA as $icon_name ) {
-				$icon_options[ $icon_name ] = $icon_name;
-			}
-
-			foreach ( self::ICONS_BRAND as $icon_name ) {
-				/* translators: %s: the brand icon's name. */
-				$icon_options[ $icon_name ] = sprintf( esc_html__( '%s (brand)', 'holiday-mode-for-hivepress' ), $icon_name );
-			}
-
-			ksort( $icon_options );
 
 			$icon_size_description = esc_html__( 'Size as a percentage of the surrounding text, between 50 and 400. Leave blank for the standard size.', 'holiday-mode-for-hivepress' );
 
@@ -629,7 +680,7 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 								'label'       => esc_html__( 'Banner Message', 'holiday-mode-for-hivepress' ),
 								/* translators: %s and %username% are typed literally by the site owner; %s marks where the account settings link goes and %username% is replaced with the vendor's display name. */
 								'description' => esc_html__( 'The sentence after the label. Type %s where the link to the account settings page should appear. Leave blank to use the standard wording. %username% shows the vendor\'s display name.', 'holiday-mode-for-hivepress' ), // phpcs:ignore WordPress.WP.I18n.UnorderedPlaceholdersText -- %username% is a literal token shown to the site owner, not a printf placeholder; the sniff reads its "%u" as one.
-								/* translators: %s is the linked "Account → Settings" text. */
+								/* translators: %s is the linked "Account â†’ Settings" text. */
 								'placeholder' => __( 'Your listings are hidden from visitors until you switch it off in %s.', 'holiday-mode-for-hivepress' ),
 								'type'        => 'textarea',
 								'max_length'  => 500,
@@ -642,6 +693,7 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 								'description' => esc_html__( 'The icon shown at the start of the banner. Leave empty to use the information icon. Brand icons are marked in the list.', 'holiday-mode-for-hivepress' ),
 								'type'        => 'select',
 								'options'     => $icon_options,
+								'source'      => $icon_source,
 								'attributes'  => [
 									'data-template' => 'icon',
 								],
@@ -749,6 +801,7 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 								'description' => esc_html__( 'The icon shown at the start of the notice. Leave empty to use the information icon. Brand icons are marked in the list.', 'holiday-mode-for-hivepress' ),
 								'type'        => 'select',
 								'options'     => $icon_options,
+								'source'      => $icon_source,
 								'attributes'  => [
 									'data-template' => 'icon',
 								],
@@ -840,9 +893,20 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 							'holiday_mode_for_hivepress_require_membership' => [
 								'label'       => esc_html__( 'Membership Required to Restore', 'holiday-mode-for-hivepress' ),
 								'caption'     => esc_html__( 'Ask a vendor to renew a lapsed membership before their listings come back', 'holiday-mode-for-hivepress' ),
-								'description' => esc_html__( 'With this ticked, a vendor whose HivePress Membership has lapsed must renew before their listings come back. It only takes effect where HivePress Memberships is active and covers listings. Leave unticked unless you deliberately want that gate.', 'holiday-mode-for-hivepress' ),
+								'description' => esc_html__( 'With this ticked, a vendor whose HivePress Membership has lapsed must renew before their listings come back. It only takes effect where HivePress Memberships is active and covers listings, and only for the plans you choose below. Leave unticked unless you deliberately want that gate.', 'holiday-mode-for-hivepress' ),
 								'type'        => 'checkbox',
 								'_order'      => 10,
+							],
+
+							'holiday_mode_for_hivepress_membership_plans' => [
+								'label'       => esc_html__( 'Plans That Block Restoring', 'holiday-mode-for-hivepress' ),
+								'description' => esc_html__( 'Choose which membership plans the check applies to. A vendor is asked to renew only when a membership on one of these plans has lapsed, so a lapsed plan you leave unselected never stands in the way. Leave this empty and the check does nothing at all, whatever the tick box above says.', 'holiday-mode-for-hivepress' ),
+								'type'        => 'select',
+								'multiple'    => true,
+								'options'     => 'posts',
+								'option_args' => [ 'post_type' => 'hp_membership_plan' ],
+								'_parent'     => 'holiday_mode_for_hivepress_require_membership',
+								'_order'      => 20,
 							],
 						],
 					],
@@ -1082,7 +1146,7 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			if ( 'banner' === $context ) {
 				$label = __( 'Holiday mode is active.', 'holiday-mode-for-hivepress' );
 
-				/* translators: %s is the linked "Account → Settings" text. */
+				/* translators: %s is the linked "Account â†’ Settings" text. */
 				$message = __( 'Your listings are hidden from visitors until you switch it off in %s.', 'holiday-mode-for-hivepress' );
 			} else {
 				$label   = __( 'On holiday', 'holiday-mode-for-hivepress' );
@@ -1288,7 +1352,53 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				return '';
 			}
 
-			return '-webkit-text-stroke:' . self::ICON_STROKES[ $weight ] . ' currentColor;paint-order:stroke fill;';
+			$width = self::ICON_STROKES[ $weight ];
+
+			// Two declarations for two renderers. -webkit-text-stroke thickens a
+			// FONT glyph and does nothing to an SVG; stroke/stroke-width do the
+			// reverse. Both are inherited properties, so putting them on the
+			// wrapper reaches the <path> inside the inline SVG without needing a
+			// stylesheet, and the pair keeps the weight option working whether
+			// FAFH drew the icon or the webfont fallback did.
+			return '-webkit-text-stroke:' . $width . ' currentColor;stroke:currentColor;stroke-width:' . $width . ';paint-order:stroke fill;';
+		}
+
+		/**
+		 * Builds the markup for one icon, preferring FAFH's inline SVG.
+		 *
+		 * Inline SVG costs a few hundred bytes instead of a ~234 KB stylesheet
+		 * and webfont, and cannot collide with the Font Awesome 5 core enqueues,
+		 * because there is no font class for core's sheet to match. Falls back to
+		 * the class-based markup if the library is unavailable, so a broken
+		 * include degrades to the previous behaviour rather than to nothing.
+		 *
+		 * @param string $icon  Validated bare icon name.
+		 * @param string $style Inline CSS for the wrapper, already escaped-safe.
+		 * @return string
+		 */
+		public function get_icon_markup( $icon, $style = '' ) {
+			if ( ! $icon ) {
+				return '';
+			}
+
+			$attributes = ' aria-hidden="true"' . ( '' !== $style ? ' style="' . esc_attr( $style ) . '"' : '' );
+
+			if ( class_exists( 'FAFH' ) ) {
+				$svg = FAFH::svg( $icon );
+
+				if ( $svg ) {
+					return '<i class="fafh-icon"' . $attributes . '>' . $svg . '</i>';
+				}
+			}
+
+			// Only the icons core's Font Awesome 5 cannot draw need a stylesheet.
+			// Enqueueing unconditionally here would put ~234 KB on pages whose
+			// icon core already covers, which is what this whole change removes.
+			if ( $this->icon_needs_fontawesome( $icon ) ) {
+				$this->enqueue_fontawesome();
+			}
+
+			return '<i class="' . esc_attr( $this->get_icon_class( $icon ) ) . '"' . $attributes . '></i>';
 		}
 
 		/**
@@ -1302,45 +1412,15 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		 * @return void
 		 */
 		public function enqueue_fontawesome() {
-			if ( ! wp_style_is( self::FONTAWESOME_HANDLE, 'registered' ) ) {
-				/*
-				 * Font Awesome 7.1.0 Free is BUNDLED, in assets/vendor/fontawesome/. Never
-				 * point this at cdnjs or any other CDN. A convenience CDN copy of a library is
-				 * the exact case the offloaded-assets rule exists to catch
-				 * (resources/security-standards.md, "Offloaded assets" - a remote asset is only
-				 * acceptable when it is a service's own required SDK from that service's own
-				 * domain), Plugin Check reported EnqueuedResourceOffloading on every plugin
-				 * that did it, and Chris ruled on 2026-08-30 that the files ship with the
-				 * plugin. It is also faster: cache partitioning (Chrome 86+, Firefox, Safari)
-				 * means a CDN copy is a cold download for every site anyway, plus a DNS lookup
-				 * and TLS handshake to a third origin.
-				 *
-				 * Layout matters. assets/vendor/fontawesome/css/all.min.css sits beside
-				 * assets/vendor/fontawesome/webfonts/, so the stock "../webfonts/" paths inside
-				 * the upstream CSS resolve unchanged. Three faces ship - fa-solid-900.woff2,
-				 * fa-brands-400.woff2 and fa-regular-400.woff2 - and only the v4-compatibility
-				 * @font-face block was removed from the CSS, so nothing can request a file that
-				 * is not there. The regular face is NOT optional, and it costs ~19 KB: with no
-				 * weight-400 face declared the browser silently substitutes the weight-900
-				 * solid one, so a far / fa-regular name draws a FILLED glyph instead of an
-				 * outline. That shipped between 2026-08-29 and 2026-08-30 and read as somebody
-				 * picking the wrong icon rather than as a missing font, which is why it
-				 * survived a whole day.
-				 *
-				 * Pinned to 7.1.0, and every plugin sharing this handle must pin the identical
-				 * version, because only the first registration of a shared handle wins.
-				 * Full rule: resources/hivepress-ui.md, "FA6/7 and brand icons: bundle them,
-				 * never load a CDN copy (2026-08-30)".
-				 */
-				wp_register_style(
-					self::FONTAWESOME_HANDLE,
-					plugin_dir_url( __FILE__ ) . self::FONTAWESOME_PATH,
-					[],
-					self::FONTAWESOME_VERSION
-				);
+			// Delegates to FAFH, which owns the admin assets. There is no font
+			// behind this any more: the front end draws inline SVG, and wp-admin
+			// gets a shim that converts a picker's <i class="fas fa-star"> into
+			// SVG too. Without FAFH it does nothing at all, deliberately -- the
+			// bundled webfont it used to register was deleted in the same change,
+			// so falling back to it would enqueue a 404.
+			if ( class_exists( 'FAFH' ) ) {
+				FAFH::enqueue_admin();
 			}
-
-			wp_enqueue_style( self::FONTAWESOME_HANDLE );
 		}
 
 		/**
@@ -1354,6 +1434,12 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		 * @return void
 		 */
 		public function maybe_enqueue_fontawesome() {
+			// Inline SVG needs no stylesheet, so this only matters in the
+			// fallback case where the library failed to load.
+			if ( class_exists( 'FAFH' ) ) {
+				return;
+			}
+
 			if ( ! is_user_logged_in() ) {
 				return;
 			}
@@ -2532,7 +2618,38 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		 * @return bool
 		 */
 		private function membership_gate_enabled() {
-			return (bool) get_option( self::REQUIRE_MEMBERSHIP_OPTION );
+			return (bool) get_option( self::REQUIRE_MEMBERSHIP_OPTION ) && (bool) $this->gated_membership_plans();
+		}
+
+		/**
+		 * Membership plan IDs the restore gate applies to.
+		 *
+		 * An empty list means the gate is off; membership_gate_enabled() treats it
+		 * that way, so every caller gets the same answer without repeating the
+		 * rule. See MEMBERSHIP_PLANS_OPTION for why empty is off rather than all.
+		 *
+		 * @return array Positive integer plan IDs, or an empty array.
+		 */
+		private function gated_membership_plans() {
+			$stored = get_option( self::MEMBERSHIP_PLANS_OPTION, [] );
+
+			// A cleared multi-select saves as an empty string, not an empty array
+			// (resources/hivepress-settings.md, the stored-empty-string trap).
+			if ( ! is_array( $stored ) ) {
+				$stored = '' === $stored || null === $stored ? [] : [ $stored ];
+			}
+
+			$plans = [];
+
+			foreach ( $stored as $plan_id ) {
+				$plan_id = absint( $plan_id );
+
+				if ( $plan_id ) {
+					$plans[] = $plan_id;
+				}
+			}
+
+			return array_values( array_unique( $plans ) );
 		}
 
 		/**
@@ -2569,11 +2686,26 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				return null;
 			}
 
+			$plans = $this->gated_membership_plans();
+
+			// Empty means the gate is off, and membership_gate_enabled() has already
+			// said so before this runs. Repeated here because check_memberships() is
+			// reachable on its own and must never widen to every plan by accident.
+			if ( ! $plans ) {
+				return null;
+			}
+
 			try {
+				// Scoped to the chosen plans on both queries. A membership on a plan
+				// the owner did not select is ignored entirely: it neither satisfies
+				// the gate nor trips it. `plan` is the Membership model field aliased
+				// to post_parent (hivepress-memberships/includes/models/
+				// class-membership.php:66-71).
 				$active = \HivePress\Models\Membership::query()->filter(
 					[
-						'status' => 'publish',
-						'user'   => $user_id,
+						'status'   => 'publish',
+						'user'     => $user_id,
+						'plan__in' => $plans,
 					]
 				)->get_first_id();
 
@@ -2581,12 +2713,15 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 					return true;
 				}
 
-				// Only a vendor who has actually held a membership is governed
-				// by one; anyone else got their listings another way.
+				// Only a vendor who has actually held a membership ON A SELECTED PLAN
+				// is governed by one; anyone else got their listings another way.
+				// Any single lapsed selected plan blocks, which is the same
+				// all-or-nothing behaviour the unscoped check had.
 				$lapsed = \HivePress\Models\Membership::query()->filter(
 					[
 						'status__in' => [ 'draft', 'pending' ],
 						'user'       => $user_id,
+						'plan__in'   => $plans,
 					]
 				)->get_first_id();
 
@@ -2648,6 +2783,7 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				'title'       => $this->apply_username_token( $args['label'], $user_id ),
 				'message'     => $this->apply_username_token( $args['message'], $user_id ),
 				'iconClass'   => $this->get_icon_class( $args['icon'] ),
+				'iconSvg'     => class_exists( 'FAFH' ) ? FAFH::svg( $args['icon'] ) : '',
 				'iconSize'    => (int) $args['icon_size'],
 				'iconStroke'  => $this->get_icon_stroke_css( $args['icon_weight'] ),
 				'iconColor'   => $args['icon_color'],
@@ -2655,7 +2791,7 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				'textColor'   => $args['text_color'],
 				'bgColor'     => $args['bg_color'],
 				'borderColor' => $args['border_color'],
-				'link'        => __( 'Account → Settings', 'holiday-mode-for-hivepress' ),
+				'link'        => __( 'Account â†’ Settings', 'holiday-mode-for-hivepress' ),
 			];
 
 			// The icon class, size, stroke and colours are validated or built
@@ -2674,7 +2810,13 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				'banner.setAttribute("aria-live","polite");' .
 				'banner.style.cssText="position:sticky;top:0.5rem;z-index:9999;box-sizing:border-box;max-width:100%;background:"+d.bgColor+";color:"+d.textColor+";border:1px solid "+d.borderColor+";border-radius:0.5rem;padding:0.75rem 1rem;margin-bottom:1rem;display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,.05)";' .
 				'var icon=document.createElement("i");' .
-				'icon.className=d.iconClass;' .
+				// d.iconSvg is markup FAFH built from its own bundled data, keyed
+				// by an icon name this plugin validated server-side; no visitor
+				// input reaches it. Anything that IS visitor-facing text below
+				// still goes through createTextNode. If the library is missing,
+				// iconSvg is '' and the class-based markup takes over.
+				'if(d.iconSvg){icon.className="fafh-icon";icon.innerHTML=d.iconSvg;}' .
+				'else{icon.className=d.iconClass;}' .
 				'icon.setAttribute("aria-hidden","true");' .
 				'icon.style.cssText="color:"+d.iconColor+";font-size:"+d.iconSize+"%;line-height:1;"+d.iconStroke;' .
 				'var strong=document.createElement("strong");' .
@@ -2807,12 +2949,6 @@ if ( ! function_exists( 'holiday_mode_for_hivepress_vendor_notice' ) ) {
 		// value simply produces no stroke.
 		$icon_stroke = $plugin->get_icon_stroke_css( isset( $notice['icon_weight'] ) && is_scalar( $notice['icon_weight'] ) ? (string) $notice['icon_weight'] : '' );
 
-		// A brand or Font Awesome 6/7 icon renders blank under core's Font
-		// Awesome 5 stylesheet, so the plugin's own goes out with this page.
-		if ( $plugin->icon_needs_fontawesome( $icon ) ) {
-			$plugin->enqueue_fontawesome();
-		}
-
 		$label_color = isset( $notice['label_color'] ) && preg_match( '/^#[0-9a-fA-F]{6}$/', (string) $notice['label_color'] ) ? (string) $notice['label_color'] : Holiday_Mode_For_HivePress::COLOR_DEFAULT;
 
 		$text_color = isset( $notice['text_color'] ) && preg_match( '/^#[0-9a-fA-F]{6}$/', (string) $notice['text_color'] ) ? (string) $notice['text_color'] : Holiday_Mode_For_HivePress::COLOR_DEFAULT;
@@ -2837,7 +2973,9 @@ if ( ! function_exists( 'holiday_mode_for_hivepress_vendor_notice' ) ) {
 
 		$output = '<div class="holiday-mode-for-hivepress-vendor-notice" role="status" style="display:flex;align-items:flex-start;gap:0.75rem;box-sizing:border-box;background:' . esc_attr( $bg_color ) . ';border:1px solid ' . esc_attr( $border_color ) . ';border-radius:0.5rem;padding:1rem;margin:0 0 2rem;">';
 
-		$output .= '<i class="' . esc_attr( $plugin->get_icon_class( $icon ) ) . '" aria-hidden="true" style="' . esc_attr( 'color:' . $icon_color . ';font-size:' . $icon_size . '%;line-height:1.4;' . $icon_stroke ) . '"></i>';
+		// get_icon_markup() draws inline SVG and only reaches for the webfont
+		// if the library is missing, so nothing is enqueued on a normal page.
+		$output .= $plugin->get_icon_markup( $icon, 'color:' . $icon_color . ';font-size:' . $icon_size . '%;line-height:1.4;' . $icon_stroke );
 
 		$output .= '<div>';
 

@@ -4,7 +4,7 @@ Tags: hivepress, marketplace, vendor, listings, holiday
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.8.2
+Stable tag: 1.8.9
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -13,7 +13,7 @@ A Holiday Mode toggle for HivePress that hides and restores all of a vendor's li
 == Description ==
 
 Holiday Mode for HivePress adds a "Holiday mode" checkbox to the HivePress
-account settings page (Account → Settings). When a vendor enables it, all of
+account settings page (Account â†’ Settings). When a vendor enables it, all of
 their visible and scheduled listings are hidden from visitors at once. While
 holiday mode is on, any listing that becomes visible is automatically hidden
 again, and a banner is shown on the vendor's account pages so they always know
@@ -32,7 +32,7 @@ always behaved, so updating changes nothing until you change it.
 **Who is offered the switch.** Out of the box that is anyone HivePress has
 given a vendor profile plus anyone who has written a listing, whatever its
 status. You can narrow it to vendor profiles only, or hand it to particular
-user roles instead, under HivePress → Settings → Holiday Mode → Who Can Use
+user roles instead, under HivePress â†’ Settings â†’ Holiday Mode â†’ Who Can Use
 Holiday Mode. Administrators always see it, whichever you choose.
 
 **Which listings are hidden.** Published, pending, private and scheduled
@@ -61,8 +61,8 @@ something unrelated, that gate could trap a vendor for good over a lapsed
 newsletter subscription, so the subscription check has been removed.
 
 **The HivePress Memberships check is now yours to switch on, and is off
-until you do.** Tick "Membership Required to Restore" under HivePress →
-Settings → Holiday Mode → Restoring Listings and a vendor whose membership
+until you do.** Tick "Membership Required to Restore" under HivePress â†’
+Settings â†’ Holiday Mode â†’ Restoring Listings and a vendor whose membership
 has lapsed is asked to renew before their listings come back. Leave it
 unticked, which is how every site starts and how every site upgrading from
 1.7.5 or earlier arrives, and a lapsed membership is simply not consulted.
@@ -111,7 +111,7 @@ hide listings on lapse can add its own gate through the
   on the vendor's profile page, or return an empty value to remove it.
   `icon_size` is a percentage of the surrounding text and `icon_weight` is one
   of `''`, `semibold` or `bold`. The values already reflect any customisation
-  made under HivePress → Settings → Holiday Mode.
+  made under HivePress â†’ Settings â†’ Holiday Mode.
 
 = Automatic updates =
 
@@ -129,10 +129,10 @@ row on the Plugins page. Update checks are cached for 6 hours.
 == Installation ==
 
 1. Upload the `holiday-mode-for-hivepress` folder to `/wp-content/plugins/`, or
-   install the plugin ZIP through Plugins → Add New → Upload Plugin.
+   install the plugin ZIP through Plugins â†’ Add New â†’ Upload Plugin.
 2. Activate the plugin through the Plugins screen.
 3. Make sure HivePress is installed and active. Vendors will find the
-   "Holiday mode" toggle under Account → Settings.
+   "Holiday mode" toggle under Account â†’ Settings.
 
 Once installed, future versions can be updated in place from the Plugins
 screen, with no need to download the ZIP again.
@@ -144,7 +144,7 @@ screen, with no need to download the ZIP again.
 Out of the box, vendors (users with a HivePress vendor profile or at least one
 listing, whatever its status) and administrators.
 
-You can change that under HivePress → Settings → Holiday Mode → Who Can Use
+You can change that under HivePress â†’ Settings â†’ Holiday Mode â†’ Who Can Use
 Holiday Mode. "Vendors only" drops the second half, so somebody whose listing
 is still unfinished waits until HivePress has made them a vendor. "Chosen
 roles" ignores both tests and goes purely by the roles you tick, which suits a
@@ -155,8 +155,8 @@ vendors. Administrators keep seeing it either way, and the
 = Can I stop holiday mode hiding some kinds of listing? =
 
 Yes. Published, pending, private and scheduled listings are all hidden to
-begin with, and each one is a tick box under HivePress → Settings → Holiday
-Mode → Hiding Listings. Untick any you would rather leave where it is.
+begin with, and each one is a tick box under HivePress â†’ Settings â†’ Holiday
+Mode â†’ Hiding Listings. Untick any you would rather leave where it is.
 
 Narrowing the list only affects holidays that start afterwards. A listing that
 is already hidden comes back to the status it actually had when it was hidden,
@@ -175,8 +175,8 @@ unpublished drafts are never published for you.
 Out of the box, every vendor always can. A switch-off is refused for one of
 two reasons, and neither of them is in force until you put it there.
 
-The first is the "Membership Required to Restore" setting under HivePress →
-Settings → Holiday Mode → Restoring Listings. If you have ticked it, and you
+The first is the "Membership Required to Restore" setting under HivePress â†’
+Settings â†’ Holiday Mode â†’ Restoring Listings. If you have ticked it, and you
 run HivePress Memberships with membership restrictions covering listings,
 then a vendor holding a lapsed membership is asked to renew before their
 listings come back, and the message on the form says so. Untick it and that
@@ -205,7 +205,7 @@ Neither is required, and neither gates anything unless you ask. WooCommerce
 Subscriptions is not checked at all. HivePress Memberships is checked only
 when all three of these are true: the extension is active, membership
 restrictions cover listings, and you have ticked "Membership Required to
-Restore" under HivePress → Settings → Holiday Mode. With that ticked, a
+Restore" under HivePress â†’ Settings â†’ Holiday Mode. With that ticked, a
 vendor holding a lapsed membership is asked to renew before their listings
 come back; a vendor who has never held a membership is never refused. With
 it unticked, which is the default everywhere, holiday mode switches on and
@@ -227,7 +227,7 @@ they would anywhere else.
 Your settings are kept, so you can reinstall and carry on. WordPress shows a
 warning on the delete screen saying the plugin's data goes too, but that
 warning appears for every plugin that has an uninstall file and does not
-apply here unless you tick "Delete All Data" under HivePress → Settings →
+apply here unless you tick "Delete All Data" under HivePress â†’ Settings â†’
 Holiday Mode first. Switching the plugin off, rather than deleting it,
 changes nothing at all.
 
@@ -263,13 +263,13 @@ sites with page caching, it can take until the cache next refreshes for the
 notice to appear or disappear for logged-out visitors.
 
 Site owners can change the notice's wording, icon and colours under
-HivePress → Settings → Holiday Mode, and developers can reword or remove it
+HivePress â†’ Settings â†’ Holiday Mode, and developers can reword or remove it
 entirely with the `holiday_mode_for_hivepress_vendor_notice` filter.
 
 = Can vendors write their own away message? =
 
 Yes, if you allow it. Tick "Let each vendor write their own away message"
-under HivePress → Settings → Holiday Mode, and every vendor gets two extra
+under HivePress â†’ Settings â†’ Holiday Mode, and every vendor gets two extra
 fields under their Holiday mode switch: a headline and a short explanation.
 Their words then replace the site-wide message on their own profile, using
 the same icon and colours you chose. A vendor who leaves the fields blank
@@ -285,6 +285,23 @@ cancelled. Your per-listing Statistics page is unavailable while a listing
 is hidden and returns when it is restored.
 
 == Changelog ==
+
+= 1.8.9 =
+* Added - "Plans That Block Restoring". If you use the "Membership Required to Restore" check, you
+  can now choose exactly which membership plans it applies to, so a lapsed plan you have not
+  chosen never stands in a vendor's way.
+* Changed - the "Membership Required to Restore" check now does nothing until you choose at least
+  one plan. If you had it ticked, open Restoring Listings and choose your plans to switch it
+  back on.
+* Changed - icons are now drawn directly into the page instead of being loaded as a font. A
+  visitor's browser no longer downloads roughly 230 KB of stylesheet and font files just to show
+  a few small pictures, and the icons can no longer clash with the icon font HivePress loads
+  itself. Your colour and size settings work exactly as before.
+* Added - every icon in the free Font Awesome 7 set is now available, brand icons included, which
+  is around 800 more than before. Type a few letters to find one rather than scrolling a long
+  list, and each result still shows you the icon itself.
+* Changed - the settings screen loads a great deal faster, because the icon choices are fetched as
+  you search instead of every one of them being written into the page.
 
 = 1.8.2 =
 * Changed - the settings screen now keeps its quick links in view as you scroll, and adds a
@@ -332,7 +349,7 @@ is hidden and returns when it is restored.
 
 = 1.7.6 =
 * Changed - holding a vendor's listings back over a lapsed HivePress Membership is now a setting you
-  switch on, "Membership Required to Restore" under HivePress → Settings → Holiday Mode → Restoring
+  switch on, "Membership Required to Restore" under HivePress â†’ Settings â†’ Holiday Mode â†’ Restoring
   Listings, and it starts unticked on every site, including every site updating from an earlier
   version. Nothing is switched on to preserve the old behaviour, because there was nothing to
   preserve: HivePress does not re-gate listings that are already published. When a membership lapses
@@ -342,7 +359,7 @@ is hidden and returns when it is restored.
   the holiday for the vendor beside them took nothing back from anyone and only left the one who
   used the feature worse off, with listings eventually cleaned up as old hidden ones. If you
   deliberately want that gate, tick the new box and it behaves exactly as before.
-* Added - "Who Can Use Holiday Mode" under HivePress → Settings → Holiday Mode. Choose between
+* Added - "Who Can Use Holiday Mode" under HivePress â†’ Settings â†’ Holiday Mode. Choose between
   vendors and anyone with a listing (how it has always worked, and what every site starts and
   upgrades on), vendors only, or roles you tick yourself. Administrators always see the switch
   whichever you pick, and the `holiday_mode_for_hivepress_is_vendor` filter still runs last and
@@ -419,7 +436,7 @@ is hidden and returns when it is restored.
 * Added: the profile notice's standard wording now mentions sending a message
   only on sites where the HivePress Messages extension is active.
 * Added: a Vendor Banner section and a Profile Notice section under
-  HivePress → Settings → Holiday Mode. Each lets you set the label, the
+  HivePress â†’ Settings â†’ Holiday Mode. Each lets you set the label, the
   message, the icon (chosen from HivePress's own icon list) and the label,
   text and icon colours, with a colour picker. Leave any field blank to keep
   the standard design.
@@ -436,7 +453,7 @@ is hidden and returns when it is restored.
   holiday mode off. Vendors currently on holiday are untouched.
 
 = 1.6.0 =
-* Added: a settings page (HivePress → Settings → Holiday Mode), reachable
+* Added: a settings page (HivePress â†’ Settings â†’ Holiday Mode), reachable
   from the Settings link on the plugin's row, with a "Delete All Data"
   choice.
 * Changed: deleting the plugin now KEEPS your settings unless you ask for
@@ -574,9 +591,14 @@ is hidden and returns when it is restored.
 
 == Upgrade Notice ==
 
+= 1.8.9 =
+If you use "Membership Required to Restore", it now does nothing until you
+choose which plans it applies to. Open HivePress > Settings > Holiday Mode >
+Restoring Listings and pick your plans to switch it back on.
+
 = 1.7.6 =
 Running HivePress Memberships? To keep the old behaviour, tick "Membership
-Required to Restore" under HivePress → Settings → Holiday Mode → Restoring
+Required to Restore" under HivePress â†’ Settings â†’ Holiday Mode â†’ Restoring
 Listings. It now arrives unticked on every site, including yours, because the
 gate only ever penalised vendors who used holiday mode. Everyone else:
 recommended, and nothing changes until you want it to. Two new settings

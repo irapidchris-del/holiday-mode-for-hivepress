@@ -36,15 +36,36 @@ namespace HivePress\Models {
 	if ( getenv( 'HM_MEMBERSHIPS' ) !== 'absent' ) {
 		class Membership {
 			private $wants_lapsed = false;
+			private $plans = null;
 			public static function query() { return new self(); }
 			public function filter( $a ) {
 				$this->wants_lapsed = isset( $a['status__in'] );
+
+				// Since 1.8.9 the plugin scopes both queries to the plans the owner
+				// chose. Recording it lets a test prove a membership on an
+				// UNSELECTED plan is invisible to the gate rather than merely
+				// unqueried.
+				$this->plans = $a['plan__in'] ?? null;
+				$GLOBALS['_mem_last_plans'] = $this->plans;
+
 				return $this;
 			}
 			public function get_first_id() {
-				return $this->wants_lapsed
+				$id = $this->wants_lapsed
 					? ( $GLOBALS['_mem_draft_id'] ?? 0 )
 					: ( $GLOBALS['_mem_publish_id'] ?? 0 );
+
+				// The membership sits on _mem_plan_id (default 900). A query
+				// scoped to other plans must not see it.
+				if ( $id && is_array( $this->plans ) ) {
+					$on = $GLOBALS['_mem_plan_id'] ?? 900;
+
+					if ( ! in_array( $on, $this->plans, false ) ) {
+						return 0;
+					}
+				}
+
+				return $id;
 			}
 		}
 	}
@@ -90,6 +111,7 @@ namespace {
 	function sanitize_text_field( $t ) { return trim( strip_tags( (string) $t ) ); }
 	function sanitize_hex_color( $c ) { return preg_match( '/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/', (string) $c ) ? $c : ''; }
 	function sanitize_key( $k ) { return strtolower( preg_replace( '/[^a-z0-9_\-]/i', '', (string) $k ) ); }
+	function absint( $n ) { return abs( (int) $n ); }
 	function wp_unslash( $v ) { return $v; }
 	function wp_json_encode( $d ) { return json_encode( $d ); }
 	function wp_print_inline_script_tag( $js ) { echo '<script>' . $js . '</script>'; }
@@ -320,7 +342,17 @@ namespace {
 	// The Memberships restore gate is an opt-in setting since 1.7.6, so every
 	// test that exercises it has to tick the box first. reset_state() clears
 	// $GLOBALS['_options'], so this belongs AFTER the reset, never before it.
-	function require_membership() { $GLOBALS['_options']['hp_holiday_mode_for_hivepress_require_membership'] = 1; }
+	// Since 1.8.9 the gate needs BOTH the tick box and at least one selected
+	// plan, so this selects the plan the Membership stub puts memberships on.
+	// Use require_membership_no_plans() for the empty-selection case.
+	function require_membership() {
+		$GLOBALS['_options']['hp_holiday_mode_for_hivepress_require_membership'] = 1;
+		$GLOBALS['_options']['hp_holiday_mode_for_hivepress_membership_plans']  = [ 900 ];
+	}
+
+	function require_membership_no_plans() {
+		$GLOBALS['_options']['hp_holiday_mode_for_hivepress_require_membership'] = 1;
+	}
 	function settings_form( $val, $uid = 10, $cls = 'HivePress\Forms\User_Update' ) {
 		$f = new $cls();
 		$f->fields = [ 'holiday_mode_for_hivepress' => [ 'type' => 'checkbox' ] ];
@@ -411,6 +443,29 @@ namespace {
 		$e = $INST->get_entitlement( 23 );
 		ok( false === $e['allowed'] && 'memberships_lapsed' === $e['reason'], 'A12 gate ON, lapsed membership -> blocked [1.7.6]' );
 		ok( stripos( $e['message'], 'membership' ) !== false, 'A13 message names the membership' );
+
+		// Ticked but NO plans chosen: the gate is off. Chris chose this on
+		// 2026-09-01 over "empty means every plan", because the gate has been
+		// opt-in and off by default since 1.7.6 so almost nobody has it on, and
+		// a blank field that silently governed every plan is the surprising read.
+		reset_state(); require_membership_no_plans(); $GLOBALS['_mem_ext'] = true; $GLOBALS['_mem_draft_id'] = 77;
+		$e = $INST->get_entitlement( 23 );
+		ok( true === $e['allowed'] && 'ungoverned' === $e['reason'], 'A12b ticked with no plans chosen -> gate off [1.8.9]' );
+
+		// A lapsed membership on a plan the owner did NOT select is invisible.
+		reset_state(); require_membership(); $GLOBALS['_mem_ext'] = true; $GLOBALS['_mem_draft_id'] = 77;
+		$GLOBALS['_mem_plan_id'] = 901;
+		$e = $INST->get_entitlement( 23 );
+		ok( true === $e['allowed'] && 'ungoverned' === $e['reason'], 'A12c lapsed membership on an unselected plan does not block [1.8.9]' );
+
+		// And the query really was scoped, rather than the stub guessing.
+		ok( [ 900 ] === ( $GLOBALS['_mem_last_plans'] ?? null ), 'A12d both membership queries are scoped to the chosen plans [1.8.9]' );
+
+		// An ACTIVE membership on a selected plan still satisfies the gate.
+		reset_state(); require_membership(); $GLOBALS['_mem_ext'] = true; $GLOBALS['_mem_publish_id'] = 55;
+		$GLOBALS['_mem_plan_id'] = 900;
+		$e = $INST->get_entitlement( 22 );
+		ok( true === $e['allowed'] && 'memberships_active' === $e['reason'], 'A12e active membership on a selected plan allows [1.8.9]' );
 
 		// Never held one: enrolment, not installation, confers jurisdiction.
 		reset_state(); require_membership(); $GLOBALS['_mem_ext'] = true;
@@ -784,6 +839,18 @@ namespace {
 	$ref = new ReflectionClass( $INST );
 	ok( 'hp_holiday_mode_for_hivepress_delete_data' === $ref->getConstant( 'DELETE_DATA_OPTION' ), 'K7 option constant matches hp\prefix()' );
 	ok( 'hp_holiday_mode_for_hivepress_require_membership' === $ref->getConstant( 'REQUIRE_MEMBERSHIP_OPTION' ), 'K7b gate constant matches its hp\prefix()ed field key [1.7.6]' );
+	ok( 'hp_holiday_mode_for_hivepress_membership_plans' === $ref->getConstant( 'MEMBERSHIP_PLANS_OPTION' ), 'K7c plans constant matches its hp\prefix()ed field key [1.8.9]' );
+
+	$plans = $tab['sections']['holiday_mode_for_hivepress_restore']['fields']['holiday_mode_for_hivepress_membership_plans'] ?? null;
+	// No default, for the same reason the tick box has none: HivePress writes
+	// config defaults into the database, so a default here would silently
+	// choose plans for every site at first save.
+	ok( is_array( $plans ) && 'select' === $plans['type'] && ! empty( $plans['multiple'] )
+		&& 'posts' === $plans['options']
+		&& 'hp_membership_plan' === ( $plans['option_args']['post_type'] ?? null )
+		&& 'holiday_mode_for_hivepress_require_membership' === ( $plans['_parent'] ?? null )
+		&& ! array_key_exists( 'default', $plans ),
+		'K7d plan picker is a multi-select of membership plans, gated on the tick box, no default [1.8.9]' );
 	$keep = $INST->add_settings( [ 'listings' => [ 'title' => 'Listings' ] ] );
 	ok( isset( $keep['listings'] ) && isset( $keep['holiday_mode'] ), 'K8 preserves core tabs' );
 
@@ -1181,10 +1248,16 @@ namespace {
 
 	// The stroke is a fixed map in currentColor, so it composes with the
 	// icon colour option by definition.
+	// Two declarations since 1.8.4, because there are now two renderers.
+	// -webkit-text-stroke thickens a FONT glyph and does nothing to an SVG;
+	// stroke/stroke-width do the reverse. Both are inherited properties, so the
+	// wrapper carries them and whichever renderer drew the icon picks its pair
+	// up. Dropping either one silently disables the weight option for one of
+	// the two paths, which looks like the setting being ignored.
 	ok( '' === $INST->get_icon_stroke_css( '' )
-		&& '-webkit-text-stroke:0.3px currentColor;paint-order:stroke fill;' === $INST->get_icon_stroke_css( 'semibold' )
-		&& '-webkit-text-stroke:0.5px currentColor;paint-order:stroke fill;' === $INST->get_icon_stroke_css( 'bold' ),
-		'N8 weight maps to the two stroke widths, in currentColor [1.8.0]' );
+		&& '-webkit-text-stroke:0.3px currentColor;stroke:currentColor;stroke-width:0.3px;paint-order:stroke fill;' === $INST->get_icon_stroke_css( 'semibold' )
+		&& '-webkit-text-stroke:0.5px currentColor;stroke:currentColor;stroke-width:0.5px;paint-order:stroke fill;' === $INST->get_icon_stroke_css( 'bold' ),
+		'N8 weight maps to the two stroke widths, for both the font and the SVG [1.8.4]' );
 
 	// Profile notice rendering: class, size, stroke and the stylesheet.
 	reset_state();
@@ -1195,13 +1268,13 @@ namespace {
 	ok( false !== strpos( $html, 'fa-brands fa-github' ), 'N9 profile notice emits the brand class [1.8.0]' );
 	ok( false !== strpos( $html, 'font-size:200%' ), 'N10 configured icon size rendered [1.8.0]' );
 	ok( false !== strpos( $html, '-webkit-text-stroke:0.3px currentColor' ), 'N11 weight stroke rendered [1.8.0]' );
-	ok( in_array( 'freestylr-fontawesome', $GLOBALS['_styles_enqueued'], true ), 'N12 brand icon enqueues the shared stylesheet [1.8.0]' );
+	ok( ! in_array( 'fafh-fontawesome', $GLOBALS['_styles_enqueued'], true ), 'N12 a brand icon enqueues NO front-end stylesheet [1.8.4]' );
 
 	reset_state();
 	$html = holiday_mode_for_hivepress_vendor_notice( 10 );
 	ok( false !== strpos( $html, 'fas fa-info-circle' ) && false !== strpos( $html, 'font-size:150%' ),
 		'N13 defaults render exactly as before 1.8.0 [1.8.0]' );
-	ok( ! in_array( 'freestylr-fontawesome', $GLOBALS['_styles_enqueued'], true ),
+	ok( ! in_array( 'fafh-fontawesome', $GLOBALS['_styles_enqueued'], true ),
 		'N14 an FA5-era icon loads no extra stylesheet [1.8.0]' );
 
 	// The filter can hand back junk for the new keys too.
@@ -1225,36 +1298,41 @@ namespace {
 			'N16 banner emits the brand class and stroke [1.8.0]' );
 
 		$INST->maybe_enqueue_fontawesome();
-		ok( in_array( 'freestylr-fontawesome', $GLOBALS['_styles_enqueued'], true ),
-			'N17 banner with a brand icon enqueues the stylesheet early [1.8.0]' );
+		ok( ! in_array( 'fafh-fontawesome', $GLOBALS['_styles_enqueued'], true ),
+			'N17 a banner brand icon enqueues NO stylesheet: the banner draws inline SVG [1.8.4]' );
 
 		reset_state(); $GLOBALS['_current_user_id'] = 10; $GLOBALS['_vendor_first_id'] = 88;
 		$GLOBALS['_usermeta'][10]['_holiday_mode_for_hivepress'] = true;
 		$INST->maybe_enqueue_fontawesome();
-		ok( ! in_array( 'freestylr-fontawesome', $GLOBALS['_styles_enqueued'], true ),
+		ok( ! in_array( 'fafh-fontawesome', $GLOBALS['_styles_enqueued'], true ),
 			'N18 default icon -> no early enqueue [1.8.0]' );
 
 		reset_state(); $GLOBALS['_current_user_id'] = 10; $GLOBALS['_vendor_first_id'] = 88;
 		$GLOBALS['_options']['hp_holiday_mode_for_hivepress_banner_icon'] = 'github';
 		$INST->maybe_enqueue_fontawesome();
-		ok( ! in_array( 'freestylr-fontawesome', $GLOBALS['_styles_enqueued'], true ),
+		ok( ! in_array( 'fafh-fontawesome', $GLOBALS['_styles_enqueued'], true ),
 			'N19 holiday off -> no early enqueue [1.8.0]' );
 	}
 
-	// The shared handle: registered only when nobody else got there first,
-	// so one copy serves every plugin using it.
+	// enqueue_fontawesome() delegates to FAFH, which owns the admin assets.
+	// This harness runs WITHOUT FAFH loaded on purpose -- it stubs only part
+	// of WordPress, so the loader fails soft -- which makes these two the
+	// check that a site where the library did not load degrades quietly
+	// rather than registering a stylesheet that no longer exists. Before
+	// 1.2.0 it registered a bundled webfont; that file is deleted, so
+	// reinstating the old behaviour would enqueue a 404.
 	reset_state();
 	$INST->enqueue_fontawesome();
-	ok( ! empty( $GLOBALS['_styles_registered']['freestylr-fontawesome'] )
-		&& in_array( 'freestylr-fontawesome', $GLOBALS['_styles_enqueued'], true ),
-		'N20 stylesheet registered and enqueued under the shared handle [1.8.0]' );
+	ok( empty( $GLOBALS['_styles_registered']['fafh-fontawesome'] )
+		&& ! in_array( 'fafh-fontawesome', $GLOBALS['_styles_enqueued'], true ),
+		'N20 without FAFH nothing is registered or enqueued [1.8.4]' );
 
+	// And it must not touch a handle a sibling plugin owns.
 	reset_state();
-	$GLOBALS['_styles_registered']['freestylr-fontawesome'] = 'someone-else';
+	$GLOBALS['_styles_registered']['fafh-fontawesome'] = 'someone-else';
 	$INST->enqueue_fontawesome();
-	ok( 'someone-else' === $GLOBALS['_styles_registered']['freestylr-fontawesome']
-		&& in_array( 'freestylr-fontawesome', $GLOBALS['_styles_enqueued'], true ),
-		'N21 an already-registered shared handle is enqueued, not re-registered [1.8.0]' );
+	ok( 'someone-else' === $GLOBALS['_styles_registered']['fafh-fontawesome'],
+		'N21 a handle another plugin registered is left alone [1.8.4]' );
 
 	echo "\n----------------------------------------\n";
 	echo "RESULT: {$GLOBALS['_pass']} passed, {$GLOBALS['_fail']} failed\n";
