@@ -4,7 +4,7 @@ Tags: hivepress, marketplace, vendor, listings, holiday
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.8.11
+Stable tag: 1.8.12
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -285,6 +285,9 @@ cancelled. Your per-listing Statistics page is unavailable while a listing
 is hidden and returns when it is restored.
 
 == Changelog ==
+
+= 1.8.12 =
+* Changed: on the settings tab the help icon now sits directly after each label, and its tooltip opens to the right at full width instead of being cut into a narrow strip to the left. The same placement is used across every extension in this family.
 
 = 1.8.11 =
 * New: a live preview to the right of the settings draws the vendor banner and the profile notice
