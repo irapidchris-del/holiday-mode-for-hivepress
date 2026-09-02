@@ -3,7 +3,7 @@
  * Plugin Name:       Holiday Mode for HivePress
  * Plugin URI:        https://github.com/irapidchris-del/holiday-mode-for-hivepress
  * Description:       Holiday Mode toggle that hides and restores all of a vendor's listings, with an on-site banner while active and an away notice on the vendor's public profile. Restoring respects each listing's own expiry date, so a holiday never buys a listing extra visible time.
- * Version:           1.8.10
+ * Version:           1.8.11
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Requires Plugins:  hivepress
@@ -35,7 +35,7 @@ if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_REPO' ) ) {
 
 // Keep in step with the Version header above on every release.
 if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION' ) ) {
-	define( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION', '1.8.10' );
+	define( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION', '1.8.11' );
 }
 
 require_once __DIR__ . '/includes/class-hphm-updater.php';
@@ -390,6 +390,11 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				// Colour picker for the notice colour settings.
 				add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_settings_assets' ] );
 
+				// The live preview beside the settings. Priority 20: HivePress
+				// registers the tab's sections at 10, and the preview has to
+				// exist before they are drawn to be moved in front of them.
+				add_action( 'admin_init', [ $this, 'register_preview_section' ], 20 );
+
 				// Show admins why a vendor's listings are drafts.
 				add_filter( 'manage_hp_listing_posts_columns', [ $this, 'add_listing_admin_columns' ] );
 				add_action( 'manage_hp_listing_posts_custom_column', [ $this, 'render_listing_admin_columns' ], 10, 2 );
@@ -544,9 +549,10 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			// (`hivepress/assets/js/common.js:1280-1289`), which is right for the
 			// checkbox parents core uses it with and wrong for a three-way
 			// select, because "Vendors only" would reveal a role list that is
-			// never read. Two plain fields plus a description that says when the
-			// second one applies is honest; a box that appears at the wrong
-			// moment is not.
+			// never read. Instead assets/js/backend.js shows the roles field only
+			// while this select says Chosen roles (Chris, 2026-09-02), and the
+			// description still says when it applies for anyone reading the page
+			// without the script.
 			$role_options = [];
 
 			if ( function_exists( 'wp_roles' ) ) {
@@ -680,7 +686,7 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 								'label'       => esc_html__( 'Banner Message', 'holiday-mode-for-hivepress' ),
 								/* translators: %s and %username% are typed literally by the site owner; %s marks where the account settings link goes and %username% is replaced with the vendor's display name. */
 								'description' => esc_html__( 'The sentence after the label. Type %s where the link to the account settings page should appear. Leave blank to use the standard wording. %username% shows the vendor\'s display name.', 'holiday-mode-for-hivepress' ), // phpcs:ignore WordPress.WP.I18n.UnorderedPlaceholdersText -- %username% is a literal token shown to the site owner, not a printf placeholder; the sniff reads its "%u" as one.
-								/* translators: %s is the linked "Account â†’ Settings" text. */
+								/* translators: %s is the linked "Account → Settings" text. */
 								'placeholder' => __( 'Your listings are hidden from visitors until you switch it off in %s.', 'holiday-mode-for-hivepress' ),
 								'type'        => 'textarea',
 								'max_length'  => 500,
@@ -1091,6 +1097,25 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				]
 			);
 
+			// The live preview beside the settings. After the colour picker
+			// and the chrome, because it listens for the events both fire.
+			wp_enqueue_style(
+				'hphm-preview',
+				$hphm_url . 'assets/css/admin-preview.css',
+				[ 'hphm-backend' ],
+				HOLIDAY_MODE_FOR_HIVEPRESS_VERSION . '.' . (int) filemtime( $hphm_path . 'assets/css/admin-preview.css' )
+			);
+
+			wp_enqueue_script(
+				'hphm-preview',
+				$hphm_url . 'assets/js/admin-preview.js',
+				[ 'jquery', 'wp-color-picker', 'hphm-backend' ],
+				HOLIDAY_MODE_FOR_HIVEPRESS_VERSION . '.' . (int) filemtime( $hphm_path . 'assets/js/admin-preview.js' ),
+				true
+			);
+
+			wp_localize_script( 'hphm-preview', 'hphmPreviewData', $this->get_preview_data() );
+
 			// Core's select2 icon template hardcodes `fas fa-fw fa-<id>`
 			// (`hivepress/assets/js/common.js:233`), which points every
 			// preview at the solid family. Brand glyphs do not exist there,
@@ -1122,6 +1147,150 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			wp_add_inline_style( 'wp-color-picker', $css );
 		}
 
+		/* ---------------- Live preview ---------------- */
+
+		/**
+		 * Registers the preview as a settings section and moves it to the
+		 * front of the tab, where the stylesheet lifts it into a column on
+		 * the right at desktop widths.
+		 *
+		 * The same shape as Action Bar's and Account Menu Enhancer's preview:
+		 * a section with no fields, drawn by a callback. HivePress renders the
+		 * tab through do_settings_sections(), so a section is the one thing
+		 * that can be placed among its own without touching its template.
+		 *
+		 * @return void
+		 */
+		public function register_preview_section() {
+			global $pagenow;
+
+			// HivePress registers its settings on options.php as well, so
+			// that a save has the field list to validate against. Nothing
+			// is rendered on that request.
+			if ( 'admin.php' !== $pagenow ) {
+				return;
+			}
+
+			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only check of which admin page is rendering.
+			$page = isset( $_GET['page'] ) ? sanitize_key( wp_unslash( $_GET['page'] ) ) : '';
+
+			if ( 'hp_settings' !== $page || ! $this->is_settings_tab() ) {
+				return;
+			}
+
+			add_settings_section( 'hphm_preview', '', [ $this, 'render_preview_section' ], 'hp_settings' );
+
+			if ( ! isset( $GLOBALS['wp_settings_sections']['hp_settings']['hphm_preview'] ) ) {
+				return;
+			}
+
+			$sections = $GLOBALS['wp_settings_sections']['hp_settings'];
+			$preview  = $sections['hphm_preview'];
+
+			unset( $sections['hphm_preview'] );
+
+			// phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Reordering our own entry in the settings section list, which is the documented way sections are held and has no setter.
+			$GLOBALS['wp_settings_sections']['hp_settings'] = array_merge( [ 'hphm_preview' => $preview ], $sections );
+		}
+
+		/**
+		 * Prints the preview panel. The notices themselves are drawn by
+		 * assets/js/admin-preview.js from the form's current values; this is
+		 * the frame they are drawn into.
+		 *
+		 * @return void
+		 */
+		public function render_preview_section() {
+			echo '<div class="hphm-preview">';
+
+			// The resize handle. A separator role with a value, so a screen
+			// reader can operate it with the arrow keys the script listens
+			// for; the pointer does the rest.
+			echo '<div class="hphm-preview__resizer" role="separator" aria-orientation="vertical" tabindex="0" aria-label="' . esc_attr__( 'Resize the preview: drag, or use the arrow keys. Double-click to reset.', 'holiday-mode-for-hivepress' ) . '" title="' . esc_attr__( 'Drag to resize. Double-click to reset.', 'holiday-mode-for-hivepress' ) . '"></div>';
+
+			echo '<div class="hphm-preview__inner">';
+			echo '<h2 class="hphm-preview__title">' . esc_html__( 'Live preview', 'holiday-mode-for-hivepress' ) . '</h2>';
+
+			// In the order the sections appear on the page.
+			$this->render_preview_panel( 'banner', esc_html__( 'Vendor banner', 'holiday-mode-for-hivepress' ) );
+			$this->render_preview_panel( 'notice', esc_html__( 'Profile notice', 'holiday-mode-for-hivepress' ) );
+
+			echo '<p class="description hphm-preview__description">' . esc_html__( 'How the banner and the notice will look with the settings on this page, following every change as you make it. The vendor name is an example. Nothing is stored until you press Save Changes.', 'holiday-mode-for-hivepress' ) . '</p>';
+			echo '</div></div>';
+		}
+
+		/**
+		 * Prints one folding panel of the preview.
+		 *
+		 * @param string $part  Either 'banner' or 'notice'.
+		 * @param string $title Panel heading, already escaped.
+		 * @return void
+		 */
+		protected function render_preview_panel( $part, $title ) {
+			$id = 'hphm-preview-panel-' . $part;
+
+			echo '<div class="hphm-preview__panel" data-panel="' . esc_attr( $part ) . '">';
+			echo '<button type="button" class="hphm-preview__header" aria-expanded="true" aria-controls="' . esc_attr( $id ) . '">';
+			echo '<span class="dashicons dashicons-arrow-up-alt2" aria-hidden="true"></span>';
+			echo '<span class="hphm-preview__panel-title">' . esc_html( $title ) . '</span>';
+			echo '</button>';
+			echo '<div class="hphm-preview__body" id="' . esc_attr( $id ) . '">';
+			echo '<div class="hphm-preview__stage"><div class="hphm-preview__page">';
+
+			// The banner sits above the account page's content, the notice
+			// stands in for the listings on a profile; the grey bars are the
+			// content around each.
+			if ( 'banner' === $part ) {
+				echo '<div data-hphm-part="banner"></div>';
+				echo '<div class="hphm-preview__ghost"></div><div class="hphm-preview__ghost hphm-preview__ghost--short"></div>';
+			} else {
+				echo '<div class="hphm-preview__ghost hphm-preview__ghost--short" style="margin:0 0 14px;"></div>';
+				echo '<div data-hphm-part="notice"></div>';
+			}
+
+			echo '</div></div>';
+			echo '</div>';
+			echo '</div>';
+		}
+
+		/**
+		 * The values the preview script needs that the form does not carry:
+		 * the standard wording, colours, icon and sizes each blank field falls
+		 * back to, and an example vendor name for the %username% token.
+		 *
+		 * @return array
+		 */
+		public function get_preview_data() {
+			$banner = $this->get_default_text( 'banner' );
+			$notice = $this->get_default_text( 'notice' );
+
+			return [
+				'defaults' => [
+					'banner' => [
+						'label'    => $banner['label'],
+						'message'  => $banner['message'],
+						'iconSize' => 130,
+					],
+					'notice' => [
+						'label'    => $notice['label'],
+						'message'  => $notice['message'],
+						'iconSize' => 150,
+					],
+				],
+				'colours'  => [
+					'text'   => self::COLOR_DEFAULT,
+					'bg'     => self::COLOR_BG,
+					'border' => self::COLOR_BORDER,
+				],
+				'icon'     => self::ICON_DEFAULT,
+				'strokes'  => self::ICON_STROKES,
+				'link'     => __( 'Account → Settings', 'holiday-mode-for-hivepress' ),
+
+				// An example only; the real notice uses the vendor's display name.
+				'username' => __( 'Sam Taylor', 'holiday-mode-for-hivepress' ),
+			];
+		}
+
 		/* ---------------- Notice customisation ---------------- */
 
 		/**
@@ -1143,22 +1312,9 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		public function get_notice_args( $context ) {
 			$context = 'banner' === $context ? 'banner' : 'notice';
 
-			if ( 'banner' === $context ) {
-				$label = __( 'Holiday mode is active.', 'holiday-mode-for-hivepress' );
-
-				/* translators: %s is the linked "Account â†’ Settings" text. */
-				$message = __( 'Your listings are hidden from visitors until you switch it off in %s.', 'holiday-mode-for-hivepress' );
-			} else {
-				$label   = __( 'On holiday', 'holiday-mode-for-hivepress' );
-				$message = __( 'This user is on holiday at the moment, so their listings are hidden until they return.', 'holiday-mode-for-hivepress' );
-
-				// Promise messaging only where the Messages extension provides
-				// it; on any other site the sentence would point at a button
-				// that does not exist.
-				if ( function_exists( 'hivepress' ) && hivepress()->get_version( 'messages' ) ) {
-					$message = __( 'This user is on holiday at the moment. You can still send them a message, but they may take longer than usual to reply.', 'holiday-mode-for-hivepress' );
-				}
-			}
+			$text    = $this->get_default_text( $context );
+			$label   = $text['label'];
+			$message = $text['message'];
 
 			$label_color = $this->get_color_option( $context . '_label_color', self::COLOR_DEFAULT );
 			$bg_color    = $this->get_color_option( $context . '_bg_color', self::COLOR_BG );
@@ -1182,6 +1338,41 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 
 				'bg_color'     => $bg_color,
 				'border_color' => $this->get_border_color( $bg_color ),
+			];
+		}
+
+		/**
+		 * Returns the built-in label and message for one of the two notices,
+		 * before any customisation from the settings tab.
+		 *
+		 * Shared by get_notice_args() and the settings-screen preview, which
+		 * needs the standard wording to show what a blank field means.
+		 *
+		 * @param string $context Either 'banner' or 'notice'.
+		 * @return array `label` and `message`.
+		 */
+		public function get_default_text( $context ) {
+			if ( 'banner' === $context ) {
+				return [
+					'label'   => __( 'Holiday mode is active.', 'holiday-mode-for-hivepress' ),
+
+					/* translators: %s is the linked "Account → Settings" text. */
+					'message' => __( 'Your listings are hidden from visitors until you switch it off in %s.', 'holiday-mode-for-hivepress' ),
+				];
+			}
+
+			$message = __( 'This user is on holiday at the moment, so their listings are hidden until they return.', 'holiday-mode-for-hivepress' );
+
+			// Promise messaging only where the Messages extension provides
+			// it; on any other site the sentence would point at a button
+			// that does not exist.
+			if ( function_exists( 'hivepress' ) && hivepress()->get_version( 'messages' ) ) {
+				$message = __( 'This user is on holiday at the moment. You can still send them a message, but they may take longer than usual to reply.', 'holiday-mode-for-hivepress' );
+			}
+
+			return [
+				'label'   => __( 'On holiday', 'holiday-mode-for-hivepress' ),
+				'message' => $message,
 			];
 		}
 
@@ -2791,7 +2982,7 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				'textColor'   => $args['text_color'],
 				'bgColor'     => $args['bg_color'],
 				'borderColor' => $args['border_color'],
-				'link'        => __( 'Account â†’ Settings', 'holiday-mode-for-hivepress' ),
+				'link'        => __( 'Account → Settings', 'holiday-mode-for-hivepress' ),
 			];
 
 			// The icon class, size, stroke and colours are validated or built

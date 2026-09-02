@@ -373,7 +373,37 @@
 		}, 0 );
 	}
 
+	/**
+	 * Shows the Chosen Roles field only while Offer the Switch To says
+	 * Chosen roles.
+	 *
+	 * Not core's `_parent` mechanism: that is truthiness-only, so it would
+	 * reveal the roles for "Vendors only" as well, a list that choice never
+	 * reads (the reasoning is with the field in the main file). Bound with
+	 * jQuery because a select HivePress has dressed as select2 announces its
+	 * changes with a jQuery-triggered event that a native listener never
+	 * hears. The row is hidden, not removed, so the ticked roles still post
+	 * and are kept for when the choice comes back.
+	 */
+	function gateChosenRoles() {
+		var select = document.querySelector( '[name="' + CHROME.fieldPrefix + 'audience"]' ),
+			roles = document.querySelector( '[name^="' + CHROME.fieldPrefix + 'audience_roles"]' ),
+			row = roles ? roles.closest( 'tr' ) : null;
+
+		if ( ! select || ! row ) {
+			return;
+		}
+
+		function update() {
+			row.hidden = 'roles' !== select.value;
+		}
+
+		$( select ).on( 'change', update );
+		update();
+	}
+
 	$( document ).ready( function () {
 		addSettingsChrome();
+		gateChosenRoles();
 	} );
 } )( jQuery );

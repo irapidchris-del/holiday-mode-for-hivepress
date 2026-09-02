@@ -1,0 +1,197 @@
+/* Holiday Mode for HivePress: the live preview beside the settings.
+ *
+ * Copied from Action Bar for HivePress (assets/css/backend.min.css, the .hpab-preview rules) with
+ * the prefix changed and the stage rules swapped for this plugin's own. The column, the folding
+ * panels and the drag handle are the same in every extension that has a preview, so an owner
+ * moving between two of these tabs finds the same panel in the same place. Fix the reference and
+ * sweep the siblings rather than improving one copy. */
+
+.hphm-preview {
+	box-sizing: border-box;
+	margin: 20px 0;
+	padding: 12px 16px 16px;
+	background-color: #fff;
+	border: 1px solid #c3c4c7;
+	border-radius: 4px;
+}
+
+.hphm-preview__title {
+	margin: 0 0 10px;
+	padding: 0;
+	font-size: 14px;
+	line-height: 1.4;
+}
+
+.hphm-preview__panel + .hphm-preview__panel {
+	margin-top: 10px;
+	padding-top: 10px;
+	border-top: 1px solid #f0f0f1;
+}
+
+.hphm-preview__header {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	width: 100%;
+	margin: 0 0 8px;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	text-align: start;
+	cursor: pointer;
+}
+
+.hphm-preview__panel--collapsed .hphm-preview__header {
+	margin-bottom: 0;
+}
+
+.hphm-preview__header .dashicons {
+	color: #50575e;
+}
+
+.hphm-preview__panel-title {
+	font-size: 13px;
+	font-weight: 600;
+	color: #1d2327;
+}
+
+.hphm-preview__header:hover .hphm-preview__panel-title,
+.hphm-preview__header:focus .hphm-preview__panel-title {
+	color: #2271b1;
+}
+
+.hphm-preview__body[hidden] {
+	display: none;
+}
+
+/* The stage: a slice of page for the preview to sit on. The checkerboard says "this is a preview"
+ * without pretending to be a theme; the white page inside it is where the front end draws. */
+.hphm-preview__stage {
+	position: relative;
+	padding: 14px;
+	overflow: hidden;
+	background-color: #f6f7f7;
+	background-image: linear-gradient(45deg, #ececec 25%, transparent 25%, transparent 75%, #ececec 75%), linear-gradient(45deg, #ececec 25%, transparent 25%, transparent 75%, #ececec 75%);
+	background-size: 16px 16px;
+	background-position: 0 0, 8px 8px;
+	border: 1px solid #dcdcde;
+	border-radius: 3px;
+}
+
+.hphm-preview__page {
+	box-sizing: border-box;
+	padding: 14px;
+	background: #fff;
+	border-radius: 3px;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+	/* Front-end text sizes, so rem and em values read as they will on the site. */
+	font-size: 15px;
+	line-height: 1.5;
+	color: #2c3338;
+}
+
+.hphm-preview__page a {
+	color: inherit;
+}
+
+/* Grey bars standing in for the page content the real thing sits above or among. */
+.hphm-preview__ghost {
+	height: 10px;
+	margin: 14px 0 0;
+	border-radius: 5px;
+	background: #f0f0f1;
+}
+
+.hphm-preview__ghost--short {
+	width: 60%;
+}
+
+.hphm-preview__description {
+	margin: 12px 0 0;
+}
+
+/* Said in place of the preview when there is nothing to draw. */
+.hphm-preview__note {
+	margin: 0;
+	padding: 18px 14px 20px;
+	color: #646970;
+	font-size: 12px;
+	line-height: 1.5;
+	text-align: center;
+}
+
+/* The resize handle: a strip on the panel's left edge, only meaningful when the panel is a column
+ * beside the settings, so it exists only in that layout. */
+.hphm-preview__resizer {
+	display: none;
+}
+
+@media screen and (min-width: 1200px) {
+	/*
+	 * The panel's width is a variable on the form, set by admin-preview.js when the handle is
+	 * dragged and remembered per browser. The settings column's padding follows it, so the two
+	 * never overlap however wide the panel is pulled. 320px is the default and the fallback.
+	 */
+	form.hp-form--table:has(> .hphm-preview) {
+		position: relative;
+		padding-right: calc(var(--hphm-preview-width, 320px) + 76px);
+	}
+
+	form.hp-form--table:has(> .hphm-preview) > .hphm-preview {
+		position: absolute;
+		top: 0;
+		right: 44px;
+		bottom: 0;
+		width: var(--hphm-preview-width, 320px);
+		margin-top: 0;
+		margin-bottom: 0;
+	}
+
+	form.hp-form--table:has(> .hphm-preview) > .hphm-preview > .hphm-preview__inner {
+		position: sticky;
+		top: 52px;
+	}
+
+	.hphm-preview__resizer {
+		display: block;
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		left: -6px;
+		width: 12px;
+		cursor: col-resize;
+		touch-action: none;
+		z-index: 2;
+	}
+
+	/* A grip, drawn only while the pointer is over the edge or the handle has focus. */
+	.hphm-preview__resizer::before {
+		content: "";
+		position: absolute;
+		top: 50%;
+		left: 4px;
+		width: 4px;
+		height: 36px;
+		margin-top: -18px;
+		border-radius: 2px;
+		background: #c3c4c7;
+		opacity: 0;
+		transition: opacity 0.15s;
+	}
+
+	.hphm-preview__resizer:hover::before,
+	.hphm-preview__resizer:focus-visible::before,
+	.hphm-preview--resizing .hphm-preview__resizer::before {
+		opacity: 1;
+		background: #2271b1;
+	}
+
+	.hphm-preview__resizer:focus-visible {
+		outline: none;
+	}
+
+	.hphm-preview--resizing,
+	.hphm-preview--resizing * {
+		user-select: none;
+	}
+}
