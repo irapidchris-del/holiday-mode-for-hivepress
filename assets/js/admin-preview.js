@@ -330,7 +330,7 @@
 
 		/* ---- resizable panel ------------------------------------------------ */
 
-		var WIDTH_DEFAULT = 320,
+		var WIDTH_DEFAULT = 400,
 			WIDTH_MIN = 280,
 			resizer = root.querySelector( '.hphm-preview__resizer' ),
 			form = root.closest( 'form' );
