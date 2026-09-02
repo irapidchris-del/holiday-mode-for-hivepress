@@ -4,7 +4,7 @@ Tags: hivepress, marketplace, vendor, listings, holiday
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.8.9
+Stable tag: 1.8.10
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -285,6 +285,13 @@ cancelled. Your per-listing Statistics page is unavailable while a listing
 is hidden and returns when it is restored.
 
 == Changelog ==
+
+= 1.8.10 =
+* Changed: the shared icon library is updated to the version that fixed two faults found in
+  Account Menu Enhancer 3.4.0 - a repeater row inheriting its neighbour's icon on save, and a
+  re-picked icon drawing the old glyph enlarged. Neither could happen on this extension's own
+  screens, and nothing here changes; it is released so that every combination of extensions carries
+  the corrected copy, whichever one a site happens to load it from.
 
 = 1.8.9 =
 * Added - "Plans That Block Restoring". If you use the "Membership Required to Restore" check, you
