@@ -107,10 +107,9 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		/**
 		 * Membership plans the restore gate applies to. Added 1.8.9.
 		 *
-		 * EMPTY MEANS THE GATE IS OFF, not "every plan". Chris chose that on
-		 * 2026-09-01: the gate has been opt-in and off by default since 1.7.6, so
-		 * almost nobody has it on, and a setting that silently applied to every
-		 * plan the moment it was left blank would be the surprising reading.
+		 * EMPTY MEANS THE GATE IS OFF, not "every plan". The gate has been opt-in and
+		 * off by default since 1.7.6, so a blank setting that silently applied to every
+		 * plan would be the surprising reading.
 		 */
 		const MEMBERSHIP_PLANS_OPTION = 'hp_holiday_mode_for_hivepress_membership_plans';
 
@@ -550,7 +549,7 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			// checkbox parents core uses it with and wrong for a three-way
 			// select, because "Vendors only" would reveal a role list that is
 			// never read. Instead assets/js/backend.js shows the roles field only
-			// while this select says Chosen roles (Chris, 2026-09-02), and the
+			// while this select says Chosen roles, and the
 			// description still says when it applies for anyone reading the page
 			// without the script.
 			$role_options = [];
@@ -1713,12 +1712,11 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 			}
 
 			// Mention the restore gate only where one will actually apply. The
-			// bundled gate is HivePress Memberships alone, and since 1.7.6
-			// only where the site owner has switched it on, so promising a
-			// check the plugin does not perform misleads vendors - the same
-			// trap the pre-1.3.1 wording fell into (found on staging,
-			// 2026-08-04). The old subscription sentence went with the
-			// subscription check (see get_entitlement).
+			// bundled gate is HivePress Memberships alone, and since 1.7.6 only
+			// where the site owner has switched it on, so promising a check the
+			// plugin does not perform misleads vendors (the pre-1.3.1 wording did).
+			// The old subscription sentence went with the subscription check (see
+			// get_entitlement).
 			$description = __( 'Turn this on to hide all of your listings until you switch it off.', 'holiday-mode-for-hivepress' );
 
 			if ( $this->membership_gate_enabled() && $this->memberships_govern_listings() ) {
@@ -1947,9 +1945,8 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 				 */
 				do_action( 'holiday_mode_for_hivepress/started', $user_id, $hidden );
 			} else {
-				// Delete the flag rather than storing an empty value, so
-				// switching off leaves no meta row behind (stale empty rows
-				// were observed accumulating on staging, 2026-08-04).
+				// Delete the flag rather than storing an empty value, so switching off
+				// leaves no meta row behind (stale empty rows otherwise accumulate).
 				delete_user_meta( $user_id, self::USER_META_KEY );
 
 				$counts = $this->bulk_restore( $user_id );

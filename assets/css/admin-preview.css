@@ -130,7 +130,7 @@
 	/*
 	 * The panel's width is a variable on the form, set by admin-preview.js when the handle is
 	 * dragged and remembered per browser. The settings column's padding follows it, so the two
-	 * never overlap however wide the panel is pulled. 400px is the default and the fallback (Chris, 2026-09-02: wider than the 320px the other previews use, because this one felt cramped).
+	 * never overlap however wide the panel is pulled. 400px is the default and the fallback (wider than the 320px other previews use).
 	 */
 	form.hp-form--table:has(> .hphm-preview) {
 		position: relative;

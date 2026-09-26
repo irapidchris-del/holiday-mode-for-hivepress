@@ -444,10 +444,8 @@ namespace {
 		ok( false === $e['allowed'] && 'memberships_lapsed' === $e['reason'], 'A12 gate ON, lapsed membership -> blocked [1.7.6]' );
 		ok( stripos( $e['message'], 'membership' ) !== false, 'A13 message names the membership' );
 
-		// Ticked but NO plans chosen: the gate is off. Chris chose this on
-		// 2026-09-01 over "empty means every plan", because the gate has been
-		// opt-in and off by default since 1.7.6 so almost nobody has it on, and
-		// a blank field that silently governed every plan is the surprising read.
+		// Ticked but NO plans chosen: the gate is off, not "every plan", because
+		// the gate has been opt-in and off by default since 1.7.6.
 		reset_state(); require_membership_no_plans(); $GLOBALS['_mem_ext'] = true; $GLOBALS['_mem_draft_id'] = 77;
 		$e = $INST->get_entitlement( 23 );
 		ok( true === $e['allowed'] && 'ungoverned' === $e['reason'], 'A12b ticked with no plans chosen -> gate off [1.8.9]' );

@@ -109,7 +109,7 @@ function get_file_data( $file, $fields ) {
 			'Version' => $GLOBALS['_installed_version'] ?? '1.1.0',
 			'Plugin Name' => 'Holiday Mode for HivePress',
 			'Description' => 'Vendor holiday mode.',
-			'Author' => 'Chris Bruce',
+			'Author' => 'Example Author',
 			'Author URI' => 'https://example.test/author',
 			'Requires at least' => '6.0',
 			'Requires PHP' => '7.4',
