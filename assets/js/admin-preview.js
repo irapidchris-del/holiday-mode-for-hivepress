@@ -75,20 +75,29 @@
 			return short ? ( '#' + short[ 1 ].replace( /./g, '$&$&' ) ).toLowerCase() : '';
 		}
 
-		// The bare icon name from a picker value, which may still carry a family prefix from
-		// before the icon library.
+		// The icon from a picker value: a bare name, or "far fa-{name}" for an outline. Older values
+		// may still carry a solid or brand family prefix, which is dropped as before.
 		function iconName( raw ) {
-			var name = '';
+			var name = '',
+				outline = false;
 
 			( raw || '' ).toLowerCase().split( /\s+/ ).forEach( function ( token ) {
-				if ( 0 === token.indexOf( 'fa-' ) ) {
+				if ( 'far' === token || 'fa-regular' === token ) {
+					outline = true;
+				} else if ( -1 !== [ 'fa-solid', 'fa-brands' ].indexOf( token ) ) {
+					return;
+				} else if ( 0 === token.indexOf( 'fa-' ) ) {
 					name = token.slice( 3 );
-				} else if ( ! name && /^[a-z0-9-]+$/.test( token ) && -1 === [ 'fas', 'fab', 'far' ].indexOf( token ) ) {
+				} else if ( ! name && /^[a-z0-9-]+$/.test( token ) && -1 === [ 'fas', 'fab' ].indexOf( token ) ) {
 					name = token;
 				}
 			} );
 
-			return /^[a-z0-9-]+$/.test( name ) ? name : '';
+			if ( ! /^[a-z0-9-]+$/.test( name ) ) {
+				return '';
+			}
+
+			return outline ? 'far fa-' + name : name;
 		}
 
 		// Both halves, as the front end emits them: -webkit-text-stroke for a font glyph, stroke
@@ -102,7 +111,8 @@
 		function icon( name, className, style ) {
 			var element = document.createElement( 'i' );
 
-			element.className = className + ' fa-solid fa-' + name;
+			// An outline keeps its style class, which the icon library's script reads.
+			element.className = className + ( 0 === name.indexOf( 'far fa-' ) ? ' fa-regular fa-' + name.slice( 7 ) : ' fa-solid fa-' + name );
 			element.setAttribute( 'aria-hidden', 'true' );
 
 			if ( style ) {

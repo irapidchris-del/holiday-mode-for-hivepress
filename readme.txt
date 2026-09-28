@@ -4,7 +4,7 @@ Tags: hivepress, marketplace, vendor, listings, holiday
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.8.13
+Stable tag: 1.9.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -109,7 +109,8 @@ hide listings on lapse can add its own gate through the
   Change the `title`, `message`, `icon`, `icon_size`, `icon_weight`,
   `label_color`, `text_color` or `icon_color` of the public "away" notice shown
   on the vendor's profile page, or return an empty value to remove it.
-  `icon_size` is a percentage of the surrounding text and `icon_weight` is one
+  `icon` is an icon name such as `bell`, or `far fa-bell` for its outline
+  version. `icon_size` is a percentage of the surrounding text and `icon_weight` is one
   of `''`, `semibold` or `bold`. The values already reflect any customisation
   made under HivePress → Settings → Holiday Mode.
 
@@ -285,6 +286,9 @@ cancelled. Your per-listing Statistics page is unavailable while a listing
 is hidden and returns when it is restored.
 
 == Changelog ==
+
+= 1.9.0 =
+* Added: the Banner Icon and Notice Icon dropdowns also offer the outline version of each icon that has one, marked (outline) in the list. Icons already chosen keep their solid look.
 
 = 1.8.13 =
 * Fixed: updating two of these extensions one after the other could fail on the second with "up to date" until Check for updates was pressed again. WordPress rebuilds its update list after each update by asking wordpress.org first, and gives up on the whole list when that call is slow; the plugin now keeps its own update in the list regardless.

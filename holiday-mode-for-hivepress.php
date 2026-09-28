@@ -3,7 +3,7 @@
  * Plugin Name:       Holiday Mode for HivePress
  * Plugin URI:        https://github.com/irapidchris-del/holiday-mode-for-hivepress
  * Description:       Holiday Mode toggle that hides and restores all of a vendor's listings, with an on-site banner while active and an away notice on the vendor's public profile. Restoring respects each listing's own expiry date, so a holiday never buys a listing extra visible time.
- * Version:           1.8.13
+ * Version:           1.9.0
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Requires Plugins:  hivepress
@@ -35,7 +35,7 @@ if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_REPO' ) ) {
 
 // Keep in step with the Version header above on every release.
 if ( ! defined( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION' ) ) {
-	define( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION', '1.8.13' );
+	define( 'HOLIDAY_MODE_FOR_HIVEPRESS_VERSION', '1.9.0' );
 }
 
 require_once __DIR__ . '/includes/class-hphm-updater.php';
@@ -695,7 +695,7 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 
 							'holiday_mode_for_hivepress_banner_icon' => [
 								'label'       => esc_html__( 'Banner Icon', 'holiday-mode-for-hivepress' ),
-								'description' => esc_html__( 'The icon shown at the start of the banner. Leave empty to use the information icon. Brand icons are marked in the list.', 'holiday-mode-for-hivepress' ),
+								'description' => esc_html__( 'The icon shown at the start of the banner. Leave empty to use the information icon. Many icons also come in an outline version, marked (outline) in the list.', 'holiday-mode-for-hivepress' ),
 								'type'        => 'select',
 								'options'     => $icon_options,
 								'source'      => $icon_source,
@@ -803,7 +803,7 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 
 							'holiday_mode_for_hivepress_notice_icon' => [
 								'label'       => esc_html__( 'Notice Icon', 'holiday-mode-for-hivepress' ),
-								'description' => esc_html__( 'The icon shown at the start of the notice. Leave empty to use the information icon. Brand icons are marked in the list.', 'holiday-mode-for-hivepress' ),
+								'description' => esc_html__( 'The icon shown at the start of the notice. Leave empty to use the information icon. Many icons also come in an outline version, marked (outline) in the list.', 'holiday-mode-for-hivepress' ),
 								'type'        => 'select',
 								'options'     => $icon_options,
 								'source'      => $icon_source,
@@ -1446,7 +1446,8 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		private function get_icon_option( $key ) {
 			$value = get_option( 'hp_holiday_mode_for_hivepress_' . $key );
 
-			if ( is_string( $value ) && preg_match( '/^[a-z0-9-]+$/', $value ) ) {
+			// A bare name, or an outline value ("far fa-heart") from the picker.
+			if ( is_string( $value ) && preg_match( '/^(?:far fa-)?[a-z0-9-]+$/', $value ) ) {
 				return $value;
 			}
 
@@ -1500,10 +1501,16 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		 * everything else keeps the `fas` class it has always had, rendered
 		 * by the Font Awesome 5 solid stylesheet core enqueues site-wide.
 		 *
-		 * @param string $icon Validated bare icon name.
+		 * An outline value keeps its style as `fa-regular`.
+		 *
+		 * @param string $icon Validated icon name or outline value.
 		 * @return string
 		 */
 		public function get_icon_class( $icon ) {
+			if ( 0 === strpos( $icon, 'far fa-' ) ) {
+				return 'fa-regular fa-' . substr( $icon, 7 );
+			}
+
 			if ( in_array( $icon, self::ICONS_BRAND, true ) ) {
 				return 'fa-brands fa-' . $icon;
 			}
@@ -1519,11 +1526,11 @@ if ( ! class_exists( 'Holiday_Mode_For_HivePress' ) ) :
 		 * Whether an icon renders only with the plugin's own Font Awesome
 		 * stylesheet: core's Font Awesome 5 solid covers everything else.
 		 *
-		 * @param string $icon Bare icon name.
+		 * @param string $icon Icon name or outline value.
 		 * @return bool
 		 */
 		public function icon_needs_fontawesome( $icon ) {
-			return in_array( $icon, self::ICONS_BRAND, true ) || in_array( $icon, self::ICONS_SOLID_EXTRA, true );
+			return 0 === strpos( $icon, 'far fa-' ) || in_array( $icon, self::ICONS_BRAND, true ) || in_array( $icon, self::ICONS_SOLID_EXTRA, true );
 		}
 
 		/**
@@ -3129,7 +3136,7 @@ if ( ! function_exists( 'holiday_mode_for_hivepress_vendor_notice' ) ) {
 		// The filter can return anything, and the icon, size, weight and
 		// colours land in class and style attributes, so validate them again
 		// here rather than trusting the save-time checks.
-		$icon = isset( $notice['icon'] ) && preg_match( '/^[a-z0-9-]+$/', (string) $notice['icon'] ) ? (string) $notice['icon'] : Holiday_Mode_For_HivePress::ICON_DEFAULT;
+		$icon = isset( $notice['icon'] ) && preg_match( '/^(?:far fa-)?[a-z0-9-]+$/', (string) $notice['icon'] ) ? (string) $notice['icon'] : Holiday_Mode_For_HivePress::ICON_DEFAULT;
 
 		$icon_size = isset( $notice['icon_size'] ) && is_numeric( (string) $notice['icon_size'] ) && (int) $notice['icon_size'] >= 50 && (int) $notice['icon_size'] <= 400 ? (int) $notice['icon_size'] : 150;
 
